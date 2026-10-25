@@ -40,10 +40,10 @@ jobs:
           cfn-lint cloudformation/network.yaml
 
   deploy-network:
-    if: false
     name: Deploy network stack
+    if: false
     needs: validate
-    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    # if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
 
     permissions:
