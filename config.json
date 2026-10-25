@@ -1,0 +1,10 @@
+{
+  "ProjectName": "medislot",
+  "Environment": "dev",
+  "AWSRegion": "us-east-1",
+  "StackPrefix": "medislot-dev",
+  "VpcCidr": "10.0.0.0/16",
+  "PublicSubnetCidr": "10.0.1.0/24",
+  "PrivateSubnetACidr": "10.0.11.0/24",
+  "PrivateSubnetBCidr": "10.0.12.0/24"
+}
