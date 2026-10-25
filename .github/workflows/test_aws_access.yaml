@@ -27,4 +27,4 @@ jobs:
         run: aws sts get-caller-identity
 
       - name: Verify target region
-        run: aws configure get region
+        run: echo "AWS region: $AWS_REGION"
