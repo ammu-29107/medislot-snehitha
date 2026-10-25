@@ -11,7 +11,7 @@ on:
       - '.github/workflows/**'
   push:
     branches:
-      - main
+      - milestone-2
     paths:
       - 'config.json'
       - 'README.md'
@@ -40,6 +40,7 @@ jobs:
           cfn-lint cloudformation/network.yaml
 
   deploy-network:
+    if: false
     name: Deploy network stack
     needs: validate
     if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
