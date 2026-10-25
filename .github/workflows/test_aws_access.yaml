@@ -19,7 +19,9 @@ jobs:
         id: config
         shell: bash
         run: |
-          echo "aws_region=$(jq -r '.AWSRegion' config.json)" >> "$GITHUB_OUTPUT"
+          aws_region=$(jq -er '.AWSRegion | select(type == "string" and length > 0)' config.json)
+          echo "AWS region loaded: $aws_region"
+          echo "aws_region=$aws_region" >> "$GITHUB_OUTPUT"
 
       - name: Configure AWS credentials using OIDC
         uses: aws-actions/configure-aws-credentials@v4
