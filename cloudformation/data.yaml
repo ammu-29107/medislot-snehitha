@@ -117,6 +117,23 @@ Resources:
       SSESpecification:
         SSEEnabled: true
 
+  RefreshTokensTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub '${ProjectName}-${Environment}-refresh-tokens'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: tokenHash
+          AttributeType: S
+      KeySchema:
+        - AttributeName: tokenHash
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: expiryTimestamp
+        Enabled: true
+      SSESpecification:
+        SSEEnabled: true
+
   NotificationDispatchTable:
     Type: AWS::DynamoDB::Table
     Properties:
@@ -173,6 +190,9 @@ Outputs:
     Value: !Ref IdempotencyKeysTable
   TokenRevocationsTableName:
     Value: !Ref TokenRevocationsTable
+  RefreshTokensTableName:
+    Description: DynamoDB table for hashed refresh-token records
+    Value: !Ref RefreshTokensTable
   NotificationDispatchTableName:
     Value: !Ref NotificationDispatchTable
   PrivateFilesBucketName:
