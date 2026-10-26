@@ -34,16 +34,16 @@ jobs:
       - name: Validate config.json
         run: jq empty config.json
 
-      - name: Validate network template
+      - name: Validate CloudFormation templates
         run: |
           pip install cfn-lint
-          cfn-lint cloudformation/network.yaml
+          cfn-lint cloudformation/network.yaml cloudformation/data.yaml --ignore-checks W1011
+
 
   deploy-network:
     name: Deploy network stack
-    if: false
+    if: github.ref == 'refs/heads/milestone-2' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     needs: validate
-    # if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
 
     permissions:
@@ -71,7 +71,7 @@ jobs:
       - name: Verify AWS identity
         run: aws sts get-caller-identity
 
-      - name: Create network change set
+      - name: Deploy network stack
         run: |
           aws cloudformation deploy \
             --template-file cloudformation/network.yaml \
@@ -84,4 +84,51 @@ jobs:
               PrivateSubnetACidr="$(jq -r '.PrivateSubnetACidr' config.json)" \
               PrivateSubnetBCidr="$(jq -r '.PrivateSubnetBCidr' config.json)" \
             --region "${{ steps.config.outputs.region }}" \
-            --no-execute-changeset
+            --no-fail-on-empty-changeset
+
+  deploy-data:
+    name: Deploy database and data resources
+    if: github.ref == 'refs/heads/milestone-2' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    needs: deploy-network
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Read deployment configuration
+        id: config
+        shell: bash
+        run: |
+          echo "region=$(jq -r '.AWSRegion' config.json)" >> "$GITHUB_OUTPUT"
+          echo "environment=$(jq -r '.Environment' config.json)" >> "$GITHUB_OUTPUT"
+          echo "stack_prefix=$(jq -r '.StackPrefix' config.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Configure AWS credentials using OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ steps.config.outputs.region }}
+
+      - name: Deploy data stack
+        env:
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+        run: |
+          if [ -z "$DB_PASSWORD" ]; then
+            echo "DB_PASSWORD GitHub secret is missing."
+            exit 1
+          fi
+
+          aws cloudformation deploy \
+            --template-file cloudformation/data.yaml \
+            --stack-name "${{ steps.config.outputs.stack_prefix }}-data" \
+            --parameter-overrides \
+              ProjectName="$(jq -r '.ProjectName' config.json)" \
+              Environment="$(jq -r '.Environment' config.json)" \
+              DBPassword="$DB_PASSWORD" \
+            --region "${{ steps.config.outputs.region }}" \
+            --no-fail-on-empty-changeset

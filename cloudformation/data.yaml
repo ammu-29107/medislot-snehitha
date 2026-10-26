@@ -1,0 +1,181 @@
+
+AWSTemplateFormatVersion: '2010-09-09'
+Description: MediSlot development data infrastructure
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: medislot
+  Environment:
+    Type: String
+    Default: dev
+  DBInstanceClass:
+    Type: String
+    Default: db.t3.micro
+  DBUsername:
+    Type: String
+    Default: medislotadmin
+    MinLength: 1
+    MaxLength: 16
+  DBPassword:
+    Type: String
+    NoEcho: true
+    MinLength: 12
+    MaxLength: 41
+    Description: Supply securely at deployment time; never commit a real password.
+
+Resources:
+  DatabaseSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Private subnets for MediSlot MySQL
+      SubnetIds:
+        - Fn::ImportValue:
+            Fn::Sub: '${ProjectName}-${Environment}-PrivateSubnetAId'
+        - Fn::ImportValue:
+            Fn::Sub: '${ProjectName}-${Environment}-PrivateSubnetBId'
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  MediSlotDatabase:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: !Sub '${ProjectName}-${Environment}-mysql'
+      Engine: mysql
+      DBInstanceClass: !Ref DBInstanceClass
+      AllocatedStorage: 20
+      StorageType: gp3
+      StorageEncrypted: true
+      DBName: medislot
+      MasterUsername: !Ref DBUsername
+      MasterUserPassword: !Ref DBPassword
+      DBSubnetGroupName: !Ref DatabaseSubnetGroup
+      VPCSecurityGroups:
+        - Fn::ImportValue:
+            Fn::Sub: '${ProjectName}-${Environment}-DatabaseSecurityGroupId'
+      PubliclyAccessible: false
+      MultiAZ: false
+      BackupRetentionPeriod: 1
+      DeletionProtection: false
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  SlotInventoryTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub '${ProjectName}-${Environment}-slot-inventory'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: slotId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: slotId
+          KeyType: HASH
+      SSESpecification:
+        SSEEnabled: true
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+
+  IdempotencyKeysTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub '${ProjectName}-${Environment}-idempotency-keys'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: idempotencyKey
+          AttributeType: S
+      KeySchema:
+        - AttributeName: idempotencyKey
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: expiryTimestamp
+        Enabled: true
+      SSESpecification:
+        SSEEnabled: true
+
+  TokenRevocationsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub '${ProjectName}-${Environment}-token-revocations'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: jti
+          AttributeType: S
+      KeySchema:
+        - AttributeName: jti
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: expiryTimestamp
+        Enabled: true
+      SSESpecification:
+        SSEEnabled: true
+
+  NotificationDispatchTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub '${ProjectName}-${Environment}-notification-dispatch'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: notificationId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: notificationId
+          KeyType: HASH
+      SSESpecification:
+        SSEEnabled: true
+
+  PrivateFilesBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${ProjectName}-${Environment}-${AWS::AccountId}-private-files'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      VersioningConfiguration:
+        Status: Enabled
+
+  DeploymentArtifactsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${ProjectName}-${Environment}-${AWS::AccountId}-artifacts'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+Outputs:
+  DatabaseEndpoint:
+    Description: Private MySQL endpoint
+    Value: !GetAtt MediSlotDatabase.Endpoint.Address
+  DatabasePort:
+    Value: !GetAtt MediSlotDatabase.Endpoint.Port
+  SlotInventoryTableName:
+    Value: !Ref SlotInventoryTable
+  IdempotencyKeysTableName:
+    Value: !Ref IdempotencyKeysTable
+  TokenRevocationsTableName:
+    Value: !Ref TokenRevocationsTable
+  NotificationDispatchTableName:
+    Value: !Ref NotificationDispatchTable
+  PrivateFilesBucketName:
+    Value: !Ref PrivateFilesBucket
+  DeploymentArtifactsBucketName:
+    Value: !Ref DeploymentArtifactsBucket
