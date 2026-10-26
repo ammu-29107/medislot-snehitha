@@ -37,7 +37,7 @@ jobs:
       - name: Validate CloudFormation templates
         run: |
           pip install cfn-lint
-          cfn-lint cloudformation/network.yaml cloudformation/data.yaml --ignore-checks W1011
+          cfn-lint cloudformation/network.yaml cloudformation/data.yaml cloudformation/auth.yaml --ignore-checks W1011
 
 
   deploy-network:
