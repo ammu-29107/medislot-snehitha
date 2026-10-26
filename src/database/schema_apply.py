@@ -48,9 +48,18 @@ def handler(event, context):
     try:
         # This schema contains ordinary CREATE statements, not stored
         # procedures or triggers. Execute each statement separately.
+        # Remove full-line SQL comments before splitting statements.
+        sql_lines = [
+            line
+            for line in schema_sql.splitlines()
+            if not line.lstrip().startswith("--")
+            and not line.lstrip().startswith("#")
+        ]
+        sql_without_comments = "\n".join(sql_lines)
+
         statements = [
             statement.strip()
-            for statement in schema_sql.split(";")
+            for statement in sql_without_comments.split(";")
             if statement.strip()
         ]
 
