@@ -125,6 +125,46 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Provision database password in SSM
+        shell: bash
+        env:
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          PROJECT_NAME: ${{ steps.config.outputs.project_name }}
+          ENVIRONMENT: ${{ steps.config.outputs.environment }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "$DB_PASSWORD" ]]; then
+            echo "DB_PASSWORD GitHub secret is missing."
+            exit 1
+          fi
+
+          aws ssm put-parameter \
+            --name "/${PROJECT_NAME}/${ENVIRONMENT}/database/password" \
+            --type SecureString \
+            --value "$DB_PASSWORD" \
+            --overwrite
+
+      - name: Deploy data stack
+        env:
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+        run: |
+          if [ -z "$DB_PASSWORD" ]; then
+            echo "DB_PASSWORD GitHub secret is missing."
+            exit 1
+          fi
+
+          aws cloudformation deploy \
+            --template-file cloudformation/data.yaml \
+            --stack-name "${{ steps.config.outputs.stack_prefix }}-data" \
+            --parameter-overrides \
+              ProjectName="$(jq -r '.ProjectName' config.json)" \
+              Environment="$(jq -r '.Environment' config.json)" \
+              DBPassword="$DB_PASSWORD" \
+            --region "${{ steps.config.outputs.region }}" \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --no-fail-on-empty-changeset
+
       - name: Package schema migration Lambda
         shell: bash
         run: |
@@ -163,47 +203,6 @@ jobs:
 
           echo "migration_code_key=${MIGRATION_KEY}" >> "$GITHUB_OUTPUT"
 
-      - name: Provision database password in SSM
-        shell: bash
-        env:
-          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-          PROJECT_NAME: ${{ steps.config.outputs.project_name }}
-          ENVIRONMENT: ${{ steps.config.outputs.environment }}
-        run: |
-          set -euo pipefail
-
-          if [[ -z "$DB_PASSWORD" ]]; then
-            echo "DB_PASSWORD GitHub secret is missing."
-            exit 1
-          fi
-
-          aws ssm put-parameter \
-            --name "/${PROJECT_NAME}/${ENVIRONMENT}/database/password" \
-            --type SecureString \
-            --value "$DB_PASSWORD" \
-            --overwrite
-
-      - name: Deploy data stack
-        env:
-          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-        run: |
-          if [ -z "$DB_PASSWORD" ]; then
-            echo "DB_PASSWORD GitHub secret is missing."
-            exit 1
-          fi
-
-          aws cloudformation deploy \
-            --template-file cloudformation/data.yaml \
-            --stack-name "${{ steps.config.outputs.stack_prefix }}-data" \
-            --parameter-overrides \
-              ProjectName="$(jq -r '.ProjectName' config.json)" \
-              Environment="$(jq -r '.Environment' config.json)" \
-              DBPassword="$DB_PASSWORD" \
-              MigrationCodeKey="${{ steps.migration.outputs.migration_code_key }}" \
-            --region "${{ steps.config.outputs.region }}" \
-            --capabilities CAPABILITY_NAMED_IAM \
-            --no-fail-on-empty-changeset
-
       - name: Wait for RDS to become available
         shell: bash
         env:
@@ -216,6 +215,188 @@ jobs:
           aws rds wait db-instance-available \
             --db-instance-identifier "${PROJECT_NAME}-${ENVIRONMENT}-mysql" \
             --region "$REGION"
+
+      - name: Create or update schema migration Lambda
+        shell: bash
+        env:
+          REGION: ${{ steps.config.outputs.region }}
+          PROJECT_NAME: ${{ steps.config.outputs.project_name }}
+          ENVIRONMENT: ${{ steps.config.outputs.environment }}
+          STACK_PREFIX: ${{ steps.config.outputs.stack_prefix }}
+          MIGRATION_KEY: ${{ steps.migration.outputs.migration_code_key }}
+        run: |
+          set -euo pipefail
+
+          ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
+          STACK_NAME="${STACK_PREFIX}-data"
+          FUNCTION_NAME="${PROJECT_NAME}-${ENVIRONMENT}-schema-apply"
+          ROLE_NAME="${PROJECT_NAME}-${ENVIRONMENT}-schema-apply-role"
+          ARTIFACTS_BUCKET="${STACK_PREFIX}-${ACCOUNT_ID}-artifacts"
+
+          get_export() {
+            local export_name="$1"
+            aws cloudformation list-exports \
+              --region "$REGION" \
+              --query "Exports[?Name=='${export_name}'].Value | [0]" \
+              --output text
+          }
+
+          DB_HOST="$(aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" \
+            --region "$REGION" \
+            --query "Stacks[0].Outputs[?OutputKey=='DatabaseEndpoint'].OutputValue | [0]" \
+            --output text)"
+
+          DB_PORT="$(aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" \
+            --region "$REGION" \
+            --query "Stacks[0].Outputs[?OutputKey=='DatabasePort'].OutputValue | [0]" \
+            --output text)"
+
+          DB_USER="$(aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" \
+            --region "$REGION" \
+            --query "Stacks[0].Outputs[?OutputKey=='DatabaseUsername'].OutputValue | [0]" \
+            --output text)"
+
+          LAMBDA_SG="$(get_export "${PROJECT_NAME}-${ENVIRONMENT}-LambdaSecurityGroupId")"
+          SUBNET_A="$(get_export "${PROJECT_NAME}-${ENVIRONMENT}-PrivateSubnetAId")"
+          SUBNET_B="$(get_export "${PROJECT_NAME}-${ENVIRONMENT}-PrivateSubnetBId")"
+
+          for value in "$DB_HOST" "$DB_PORT" "$DB_USER" "$LAMBDA_SG" "$SUBNET_A" "$SUBNET_B"; do
+            if [[ -z "$value" || "$value" == "None" ]]; then
+              echo "A required database output or network export is missing."
+              exit 1
+            fi
+          done
+
+          cat > "$RUNNER_TEMP/lambda-trust.json" <<'JSON'
+          {
+            "Version": "2012-10-17",
+            "Statement": [{
+              "Effect": "Allow",
+              "Principal": {"Service": "lambda.amazonaws.com"},
+              "Action": "sts:AssumeRole"
+            }]
+          }
+          JSON
+
+          if ! aws iam get-role --role-name "$ROLE_NAME" >/dev/null 2>&1; then
+            aws iam create-role \
+              --role-name "$ROLE_NAME" \
+              --assume-role-policy-document "file://$RUNNER_TEMP/lambda-trust.json"
+          fi
+
+          aws iam update-assume-role-policy \
+            --role-name "$ROLE_NAME" \
+            --policy-document "file://$RUNNER_TEMP/lambda-trust.json"
+
+          cat > "$RUNNER_TEMP/lambda-policy.json" <<JSON
+          {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "logs:CreateLogGroup",
+                  "logs:CreateLogStream",
+                  "logs:PutLogEvents"
+                ],
+                "Resource": "*"
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "ec2:CreateNetworkInterface",
+                  "ec2:DescribeNetworkInterfaces",
+                  "ec2:DescribeSubnets",
+                  "ec2:DeleteNetworkInterface",
+                  "ec2:AssignPrivateIpAddresses",
+                  "ec2:UnassignPrivateIpAddresses"
+                ],
+                "Resource": "*"
+              },
+              {
+                "Effect": "Allow",
+                "Action": "ssm:GetParameter",
+                "Resource": "arn:aws:ssm:${REGION}:${ACCOUNT_ID}:parameter/${PROJECT_NAME}/${ENVIRONMENT}/database/password"
+              }
+            ]
+          }
+          JSON
+
+          aws iam put-role-policy \
+            --role-name "$ROLE_NAME" \
+            --policy-name SchemaApplyRuntimeAccess \
+            --policy-document "file://$RUNNER_TEMP/lambda-policy.json"
+
+          ROLE_ARN="$(aws iam get-role \
+            --role-name "$ROLE_NAME" \
+            --query 'Role.Arn' \
+            --output text)"
+
+          ENVIRONMENT_JSON="$(jq -n \
+            --arg host "$DB_HOST" \
+            --arg port "$DB_PORT" \
+            --arg user "$DB_USER" \
+            --arg parameter "/${PROJECT_NAME}/${ENVIRONMENT}/database/password" \
+            '{
+              Variables: {
+                DB_HOST: $host,
+                DB_PORT: $port,
+                DB_NAME: "medislot",
+                DB_USER: $user,
+                DB_PASSWORD_PARAMETER: $parameter
+              }
+            }')"
+
+          sleep 10
+
+          if aws lambda get-function \
+            --function-name "$FUNCTION_NAME" \
+            --region "$REGION" >/dev/null 2>&1; then
+
+            aws lambda update-function-code \
+              --function-name "$FUNCTION_NAME" \
+              --s3-bucket "$ARTIFACTS_BUCKET" \
+              --s3-key "$MIGRATION_KEY" \
+              --region "$REGION"
+
+            aws lambda wait function-updated-v2 \
+              --function-name "$FUNCTION_NAME" \
+              --region "$REGION"
+
+            aws lambda update-function-configuration \
+              --function-name "$FUNCTION_NAME" \
+              --role "$ROLE_ARN" \
+              --timeout 120 \
+              --memory-size 256 \
+              --vpc-config "SubnetIds=${SUBNET_A},${SUBNET_B},SecurityGroupIds=${LAMBDA_SG}" \
+              --environment "$ENVIRONMENT_JSON" \
+              --region "$REGION"
+
+            aws lambda wait function-updated-v2 \
+              --function-name "$FUNCTION_NAME" \
+              --region "$REGION"
+          else
+            aws lambda create-function \
+              --function-name "$FUNCTION_NAME" \
+              --runtime python3.12 \
+              --handler schema_apply.handler \
+              --role "$ROLE_ARN" \
+              --timeout 120 \
+              --memory-size 256 \
+              --code "S3Bucket=${ARTIFACTS_BUCKET},S3Key=${MIGRATION_KEY}" \
+              --vpc-config "SubnetIds=${SUBNET_A},${SUBNET_B},SecurityGroupIds=${LAMBDA_SG}" \
+              --environment "$ENVIRONMENT_JSON" \
+              --region "$REGION"
+
+            aws lambda wait function-active-v2 \
+              --function-name "$FUNCTION_NAME" \
+              --region "$REGION"
+          fi
+
+          echo "Schema migration Lambda is ready."
 
       - name: Apply database schema
         shell: bash
