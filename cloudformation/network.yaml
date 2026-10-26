@@ -137,6 +137,21 @@ Resources:
         - Key: Name
           Value: !Sub '${ProjectName}-${Environment}-lambda-sg'
 
+  VpcEndpointSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow Lambda functions to access VPC endpoints over HTTPS
+      VpcId: !Ref MediSlotVPC
+      SecurityGroupIngress:
+        - Description: HTTPS from Lambda functions
+          IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          SourceSecurityGroupId: !Ref LambdaSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-vpc-endpoint-sg'
+
   DatabaseSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -150,6 +165,41 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub '${ProjectName}-${Environment}-database-sg'
+
+  SsmVpcEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcEndpointType: Interface
+      VpcId: !Ref MediSlotVPC
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.ssm'
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - !Ref PrivateSubnetA
+        - !Ref PrivateSubnetB
+      SecurityGroupIds:
+        - !Ref VpcEndpointSecurityGroup
+
+  CloudWatchLogsVpcEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcEndpointType: Interface
+      VpcId: !Ref MediSlotVPC
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.logs'
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - !Ref PrivateSubnetA
+        - !Ref PrivateSubnetB
+      SecurityGroupIds:
+        - !Ref VpcEndpointSecurityGroup
+
+  DynamoDBVpcEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcEndpointType: Gateway
+      VpcId: !Ref MediSlotVPC
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.dynamodb'
+      RouteTableIds:
+        - !Ref PrivateRouteTable
 
 Outputs:
   VpcId:
@@ -182,3 +232,9 @@ Outputs:
     Value: !Ref DatabaseSecurityGroup
     Export:
       Name: !Sub '${ProjectName}-${Environment}-DatabaseSecurityGroupId'
+
+  PrivateRouteTableId:
+    Description: ID of the private route table
+    Value: !Ref PrivateRouteTable
+    Export:
+      Name: !Sub '${ProjectName}-${Environment}-PrivateRouteTableId'

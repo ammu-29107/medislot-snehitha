@@ -132,3 +132,193 @@ jobs:
               DBPassword="$DB_PASSWORD" \
             --region "${{ steps.config.outputs.region }}" \
             --no-fail-on-empty-changeset
+
+  deploy-auth:
+    name: Package and deploy authentication API
+    if: github.ref == 'refs/heads/milestone-2' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    needs: deploy-data
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Read deployment configuration
+        id: config
+        shell: bash
+        run: |
+          echo "region=$(jq -r '.AWSRegion' config.json)" >> "$GITHUB_OUTPUT"
+          echo "environment=$(jq -r '.Environment' config.json)" >> "$GITHUB_OUTPUT"
+          echo "stack_prefix=$(jq -r '.StackPrefix' config.json)" >> "$GITHUB_OUTPUT"
+          echo "project_name=$(jq -r '.ProjectName' config.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Configure AWS credentials using OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ steps.config.outputs.region }}
+
+      - name: Provision runtime secrets in SSM
+        shell: bash
+        env:
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          JWT_SIGNING_SECRET: ${{ secrets.JWT_SIGNING_SECRET }}
+          PROJECT_NAME: ${{ steps.config.outputs.project_name }}
+          ENVIRONMENT: ${{ steps.config.outputs.environment }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "$DB_PASSWORD" ]]; then
+            echo "DB_PASSWORD GitHub secret is missing."
+            exit 1
+          fi
+
+          if [[ -z "$JWT_SIGNING_SECRET" ]]; then
+            echo "JWT_SIGNING_SECRET GitHub secret is missing."
+            exit 1
+          fi
+
+          aws ssm put-parameter \
+            --name "/${PROJECT_NAME}/${ENVIRONMENT}/database/password" \
+            --type SecureString \
+            --value "$DB_PASSWORD" \
+            --overwrite
+
+          aws ssm put-parameter \
+            --name "/${PROJECT_NAME}/${ENVIRONMENT}/auth/jwt-signing-secret" \
+            --type SecureString \
+            --value "$JWT_SIGNING_SECRET" \
+            --overwrite
+
+          echo "Runtime secret parameters provisioned."
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Package registration Lambda
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          PACKAGE_DIR="$RUNNER_TEMP/register-package"
+          mkdir -p "$PACKAGE_DIR"
+
+          python -m pip install \
+            --disable-pip-version-check \
+            -r src/auth/register/requirements.txt \
+            --target "$PACKAGE_DIR"
+
+          cp src/auth/register/app.py "$PACKAGE_DIR/app.py"
+
+          (
+            cd "$PACKAGE_DIR"
+            zip -qr "$RUNNER_TEMP/register.zip" .
+          )
+
+      - name: Package login Lambda
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          PACKAGE_DIR="$RUNNER_TEMP/login-package"
+          mkdir -p "$PACKAGE_DIR"
+
+          python -m pip install \
+            --disable-pip-version-check \
+            -r src/auth/login/requirements.txt \
+            --target "$PACKAGE_DIR"
+
+          cp src/auth/login/app.py "$PACKAGE_DIR/app.py"
+
+          (
+            cd "$PACKAGE_DIR"
+            zip -qr "$RUNNER_TEMP/login.zip" .
+          )
+
+      - name: Read deployed data-stack outputs
+        id: data
+        shell: bash
+        env:
+          STACK_PREFIX: ${{ steps.config.outputs.stack_prefix }}
+        run: |
+          set -euo pipefail
+
+          STACK_NAME="${STACK_PREFIX}-data"
+
+          get_output() {
+            local key="$1"
+            local value
+
+            value="$(aws cloudformation describe-stacks \
+              --stack-name "$STACK_NAME" \
+              --query "Stacks[0].Outputs[?OutputKey=='${key}'].OutputValue | [0]" \
+              --output text)"
+
+            if [[ -z "$value" || "$value" == "None" ]]; then
+              echo "Required data-stack output is missing: ${key}" >&2
+              exit 1
+            fi
+
+            printf '%s' "$value"
+          }
+
+          echo "database_host=$(get_output DatabaseEndpoint)" >> "$GITHUB_OUTPUT"
+          echo "database_username=$(get_output DatabaseUsername)" >> "$GITHUB_OUTPUT"
+          echo "refresh_tokens_table=$(get_output RefreshTokensTableName)" >> "$GITHUB_OUTPUT"
+          echo "artifacts_bucket=$(get_output DeploymentArtifactsBucketName)" >> "$GITHUB_OUTPUT"
+
+      - name: Upload Lambda packages to S3
+        shell: bash
+        env:
+          ARTIFACTS_BUCKET: ${{ steps.data.outputs.artifacts_bucket }}
+        run: |
+          set -euo pipefail
+
+          REGISTER_KEY="lambda/auth/register-${GITHUB_SHA}.zip"
+          LOGIN_KEY="lambda/auth/login-${GITHUB_SHA}.zip"
+
+          aws s3 cp "$RUNNER_TEMP/register.zip" \
+            "s3://${ARTIFACTS_BUCKET}/${REGISTER_KEY}"
+
+          aws s3 cp "$RUNNER_TEMP/login.zip" \
+            "s3://${ARTIFACTS_BUCKET}/${LOGIN_KEY}"
+
+          echo "register_key=${REGISTER_KEY}" >> "$GITHUB_ENV"
+          echo "login_key=${LOGIN_KEY}" >> "$GITHUB_ENV"
+
+      - name: Deploy authentication stack
+        shell: bash
+        env:
+          REGION: ${{ steps.config.outputs.region }}
+          STACK_PREFIX: ${{ steps.config.outputs.stack_prefix }}
+          PROJECT_NAME: ${{ steps.config.outputs.project_name }}
+          ENVIRONMENT: ${{ steps.config.outputs.environment }}
+          ARTIFACTS_BUCKET: ${{ steps.data.outputs.artifacts_bucket }}
+          DATABASE_HOST: ${{ steps.data.outputs.database_host }}
+          DATABASE_USERNAME: ${{ steps.data.outputs.database_username }}
+          REFRESH_TOKENS_TABLE: ${{ steps.data.outputs.refresh_tokens_table }}
+        run: |
+          set -euo pipefail
+
+          aws cloudformation deploy \
+            --template-file cloudformation/auth.yaml \
+            --stack-name "${STACK_PREFIX}-auth" \
+            --parameter-overrides \
+              ProjectName="$PROJECT_NAME" \
+              Environment="$ENVIRONMENT" \
+              NetworkStackName="${STACK_PREFIX}-network" \
+              ArtifactsBucketName="$ARTIFACTS_BUCKET" \
+              RegisterCodeKey="$register_key" \
+              LoginCodeKey="$login_key" \
+              RefreshTokensTableName="$REFRESH_TOKENS_TABLE" \
+              DatabaseUsername="$DATABASE_USERNAME" \
+              DatabaseHost="$DATABASE_HOST" \
+            --region "$REGION" \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --no-fail-on-empty-changeset

@@ -182,6 +182,9 @@ Outputs:
   DatabaseEndpoint:
     Description: Private MySQL endpoint
     Value: !GetAtt MediSlotDatabase.Endpoint.Address
+  DatabaseUsername:
+    Description: Username configured for the MediSlot database
+    Value: !Ref DBUsername
   DatabasePort:
     Value: !GetAtt MediSlotDatabase.Endpoint.Port
   SlotInventoryTableName:
