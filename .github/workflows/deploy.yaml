@@ -312,7 +312,7 @@ jobs:
             --parameter-overrides \
               ProjectName="$PROJECT_NAME" \
               Environment="$ENVIRONMENT" \
-              NetworkStackName="${STACK_PREFIX}-network" \
+              NetworkStackName="${STACK_PREFIX}" \
               ArtifactsBucketName="$ARTIFACTS_BUCKET" \
               RegisterCodeKey="$register_key" \
               LoginCodeKey="$login_key" \

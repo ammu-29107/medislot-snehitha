@@ -13,7 +13,7 @@ Parameters:
 
   NetworkStackName:
     Type: String
-    Default: medislot-dev-network
+    Default: medislot-dev
 
   ArtifactsBucketName:
     Type: String
