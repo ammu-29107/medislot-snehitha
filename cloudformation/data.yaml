@@ -23,6 +23,9 @@ Parameters:
     MinLength: 12
     MaxLength: 41
     Description: Supply securely at deployment time; never commit a real password.
+  MigrationCodeKey:
+    Type: String
+    Description: S3 key for the packaged schema migration Lambda ZIP
 
 Resources:
   DatabaseSubnetGroup:
@@ -60,6 +63,89 @@ Resources:
       MultiAZ: false
       BackupRetentionPeriod: 1
       DeletionProtection: false
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  SchemaApplyExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectName}-${Environment}-schema-apply-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: SchemaApplyRuntimeAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: WriteLambdaLogs
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: '*'
+
+              - Sid: ManageLambdaNetworkInterfaces
+                Effect: Allow
+                Action:
+                  - ec2:CreateNetworkInterface
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DescribeSubnets
+                  - ec2:DeleteNetworkInterface
+                  - ec2:AssignPrivateIpAddresses
+                  - ec2:UnassignPrivateIpAddresses
+                Resource: '*'
+
+              - Sid: ReadDatabasePassword
+                Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${ProjectName}/${Environment}/database/password'
+
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  SchemaApplyFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${ProjectName}-${Environment}-schema-apply'
+      Runtime: python3.12
+      Handler: schema_apply.handler
+      Role: !GetAtt SchemaApplyExecutionRole.Arn
+      Timeout: 120
+      MemorySize: 256
+      Code:
+        S3Bucket: !Ref DeploymentArtifactsBucket
+        S3Key: !Ref MigrationCodeKey
+      VpcConfig:
+        SecurityGroupIds:
+          - Fn::ImportValue:
+              Fn::Sub: '${ProjectName}-${Environment}-LambdaSecurityGroupId'
+        SubnetIds:
+          - Fn::ImportValue:
+              Fn::Sub: '${ProjectName}-${Environment}-PrivateSubnetAId'
+          - Fn::ImportValue:
+              Fn::Sub: '${ProjectName}-${Environment}-PrivateSubnetBId'
+      Environment:
+        Variables:
+          DB_HOST: !GetAtt MediSlotDatabase.Endpoint.Address
+          DB_PORT: !GetAtt MediSlotDatabase.Endpoint.Port
+          DB_NAME: medislot
+          DB_USER: !Ref DBUsername
+          DB_PASSWORD_PARAMETER: !Sub '/${ProjectName}/${Environment}/database/password'
+
       Tags:
         - Key: Project
           Value: !Ref ProjectName

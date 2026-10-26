@@ -9,6 +9,8 @@ on:
       - 'README.md'
       - 'cloudformation/**'
       - '.github/workflows/**'
+      - 'database/schema.sql'
+      - 'src/database/**'
   push:
     branches:
       - milestone-2
@@ -17,6 +19,8 @@ on:
       - 'README.md'
       - 'cloudformation/**'
       - '.github/workflows/**'
+      - 'database/schema.sql'
+      - 'src/database/**'
   workflow_dispatch:
 
 permissions:
@@ -61,6 +65,7 @@ jobs:
           echo "region=$(jq -r '.AWSRegion' config.json)" >> "$GITHUB_OUTPUT"
           echo "environment=$(jq -r '.Environment' config.json)" >> "$GITHUB_OUTPUT"
           echo "stack_prefix=$(jq -r '.StackPrefix' config.json)" >> "$GITHUB_OUTPUT"
+          echo "project_name=$(jq -r '.ProjectName' config.json)" >> "$GITHUB_OUTPUT"
 
       - name: Configure AWS credentials using OIDC
         uses: aws-actions/configure-aws-credentials@v4
@@ -107,12 +112,76 @@ jobs:
           echo "region=$(jq -r '.AWSRegion' config.json)" >> "$GITHUB_OUTPUT"
           echo "environment=$(jq -r '.Environment' config.json)" >> "$GITHUB_OUTPUT"
           echo "stack_prefix=$(jq -r '.StackPrefix' config.json)" >> "$GITHUB_OUTPUT"
+          echo "project_name=$(jq -r '.ProjectName' config.json)" >> "$GITHUB_OUTPUT"
 
       - name: Configure AWS credentials using OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ steps.config.outputs.region }}
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Package schema migration Lambda
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          PACKAGE_DIR="$RUNNER_TEMP/schema-apply-package"
+          mkdir -p "$PACKAGE_DIR"
+
+          python -m pip install \
+            --disable-pip-version-check \
+            -r src/database/requirements.txt \
+            --target "$PACKAGE_DIR"
+
+          cp src/database/schema_apply.py "$PACKAGE_DIR/schema_apply.py"
+          cp database/schema.sql "$PACKAGE_DIR/schema.sql"
+
+          (
+            cd "$PACKAGE_DIR"
+            zip -qr "$RUNNER_TEMP/schema-apply.zip" .
+          )
+
+      - name: Upload schema migration package
+        id: migration
+        shell: bash
+        env:
+          STACK_PREFIX: ${{ steps.config.outputs.stack_prefix }}
+        run: |
+          set -euo pipefail
+
+          ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
+          ARTIFACTS_BUCKET="${STACK_PREFIX}-${ACCOUNT_ID}-artifacts"
+          MIGRATION_KEY="schema-apply/schema-apply-${GITHUB_SHA}.zip"
+
+          aws s3 cp "$RUNNER_TEMP/schema-apply.zip" \
+            "s3://${ARTIFACTS_BUCKET}/${MIGRATION_KEY}"
+
+          echo "migration_code_key=${MIGRATION_KEY}" >> "$GITHUB_OUTPUT"
+
+      - name: Provision database password in SSM
+        shell: bash
+        env:
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          PROJECT_NAME: ${{ steps.config.outputs.project_name }}
+          ENVIRONMENT: ${{ steps.config.outputs.environment }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "$DB_PASSWORD" ]]; then
+            echo "DB_PASSWORD GitHub secret is missing."
+            exit 1
+          fi
+
+          aws ssm put-parameter \
+            --name "/${PROJECT_NAME}/${ENVIRONMENT}/database/password" \
+            --type SecureString \
+            --value "$DB_PASSWORD" \
+            --overwrite
 
       - name: Deploy data stack
         env:
@@ -130,8 +199,63 @@ jobs:
               ProjectName="$(jq -r '.ProjectName' config.json)" \
               Environment="$(jq -r '.Environment' config.json)" \
               DBPassword="$DB_PASSWORD" \
+              MigrationCodeKey="${{ steps.migration.outputs.migration_code_key }}" \
             --region "${{ steps.config.outputs.region }}" \
+            --capabilities CAPABILITY_NAMED_IAM \
             --no-fail-on-empty-changeset
+
+      - name: Wait for RDS to become available
+        shell: bash
+        env:
+          REGION: ${{ steps.config.outputs.region }}
+          PROJECT_NAME: ${{ steps.config.outputs.project_name }}
+          ENVIRONMENT: ${{ steps.config.outputs.environment }}
+        run: |
+          set -euo pipefail
+
+          aws rds wait db-instance-available \
+            --db-instance-identifier "${PROJECT_NAME}-${ENVIRONMENT}-mysql" \
+            --region "$REGION"
+
+      - name: Apply database schema
+        shell: bash
+        env:
+          REGION: ${{ steps.config.outputs.region }}
+          PROJECT_NAME: ${{ steps.config.outputs.project_name }}
+          ENVIRONMENT: ${{ steps.config.outputs.environment }}
+        run: |
+          set -euo pipefail
+
+          FUNCTION_NAME="${PROJECT_NAME}-${ENVIRONMENT}-schema-apply"
+          RESPONSE_FILE="$RUNNER_TEMP/schema-response.json"
+
+          for attempt in 1 2 3 4 5; do
+            echo "Schema migration attempt ${attempt}/5"
+
+            if aws lambda invoke \
+              --function-name "$FUNCTION_NAME" \
+              --invocation-type RequestResponse \
+              --payload '{}' \
+              --cli-binary-format raw-in-base64-out \
+              --region "$REGION" \
+              "$RESPONSE_FILE" \
+              > "$RUNNER_TEMP/schema-invoke-metadata.json"; then
+
+              if jq -e '.FunctionError == null' \
+                "$RUNNER_TEMP/schema-invoke-metadata.json" > /dev/null \
+                && jq -e '.status == "SUCCESS"' "$RESPONSE_FILE" > /dev/null; then
+                cat "$RESPONSE_FILE"
+                echo "Database schema applied successfully."
+                exit 0
+              fi
+            fi
+
+            cat "$RESPONSE_FILE" 2>/dev/null || true
+            sleep 10
+          done
+
+          echo "Schema migration failed after five attempts."
+          exit 1
 
   deploy-auth:
     name: Package and deploy authentication API
