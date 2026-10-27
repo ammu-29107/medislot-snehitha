@@ -11,6 +11,7 @@ on:
       - '.github/workflows/**'
       - 'database/schema.sql'
       - 'src/database/**'
+      - 'src/auth/**'
   push:
     branches:
       - milestone-2
@@ -21,6 +22,7 @@ on:
       - '.github/workflows/**'
       - 'database/schema.sql'
       - 'src/database/**'
+      - 'src/auth/**'
   workflow_dispatch:
 
 permissions:
@@ -546,6 +548,46 @@ jobs:
             zip -qr "$RUNNER_TEMP/login.zip" .
           )
 
+      - name: Package authorizer Lambda
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          PACKAGE_DIR="$RUNNER_TEMP/authorizer-package"
+          mkdir -p "$PACKAGE_DIR"
+
+          python -m pip install \
+            --disable-pip-version-check \
+            -r src/auth/authorizer/requirements.txt \
+            --target "$PACKAGE_DIR"
+
+          cp src/auth/authorizer/app.py "$PACKAGE_DIR/app.py"
+
+          (
+            cd "$PACKAGE_DIR"
+            zip -qr "$RUNNER_TEMP/authorizer.zip" .
+          )
+
+      - name: Package profile Lambda
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          PACKAGE_DIR="$RUNNER_TEMP/profile-package"
+          mkdir -p "$PACKAGE_DIR"
+
+          python -m pip install \
+            --disable-pip-version-check \
+            -r src/auth/profile/requirements.txt \
+            --target "$PACKAGE_DIR"
+
+          cp src/auth/profile/app.py "$PACKAGE_DIR/app.py"
+
+          (
+            cd "$PACKAGE_DIR"
+            zip -qr "$RUNNER_TEMP/profile.zip" .
+          )
+
       - name: Read deployed data-stack outputs
         id: data
         shell: bash
@@ -576,6 +618,7 @@ jobs:
           echo "database_host=$(get_output DatabaseEndpoint)" >> "$GITHUB_OUTPUT"
           echo "database_username=$(get_output DatabaseUsername)" >> "$GITHUB_OUTPUT"
           echo "refresh_tokens_table=$(get_output RefreshTokensTableName)" >> "$GITHUB_OUTPUT"
+          echo "access_tokens_table=$(get_output AccessTokensTableName)" >> "$GITHUB_OUTPUT"
           echo "artifacts_bucket=$(get_output DeploymentArtifactsBucketName)" >> "$GITHUB_OUTPUT"
 
       - name: Upload Lambda packages to S3
@@ -587,6 +630,8 @@ jobs:
 
           REGISTER_KEY="lambda/auth/register-${GITHUB_SHA}.zip"
           LOGIN_KEY="lambda/auth/login-${GITHUB_SHA}.zip"
+          AUTHORIZER_KEY="lambda/auth/authorizer-${GITHUB_SHA}.zip"
+          PROFILE_KEY="lambda/auth/profile-${GITHUB_SHA}.zip"
 
           aws s3 cp "$RUNNER_TEMP/register.zip" \
             "s3://${ARTIFACTS_BUCKET}/${REGISTER_KEY}"
@@ -594,8 +639,16 @@ jobs:
           aws s3 cp "$RUNNER_TEMP/login.zip" \
             "s3://${ARTIFACTS_BUCKET}/${LOGIN_KEY}"
 
+          aws s3 cp "$RUNNER_TEMP/authorizer.zip" \
+            "s3://${ARTIFACTS_BUCKET}/${AUTHORIZER_KEY}"
+
+          aws s3 cp "$RUNNER_TEMP/profile.zip" \
+            "s3://${ARTIFACTS_BUCKET}/${PROFILE_KEY}"
+
           echo "register_key=${REGISTER_KEY}" >> "$GITHUB_ENV"
           echo "login_key=${LOGIN_KEY}" >> "$GITHUB_ENV"
+          echo "authorizer_key=${AUTHORIZER_KEY}" >> "$GITHUB_ENV"
+          echo "profile_key=${PROFILE_KEY}" >> "$GITHUB_ENV"
 
       - name: Deploy authentication stack
         shell: bash
@@ -608,6 +661,7 @@ jobs:
           DATABASE_HOST: ${{ steps.data.outputs.database_host }}
           DATABASE_USERNAME: ${{ steps.data.outputs.database_username }}
           REFRESH_TOKENS_TABLE: ${{ steps.data.outputs.refresh_tokens_table }}
+          ACCESS_TOKENS_TABLE: ${{ steps.data.outputs.access_tokens_table }}
         run: |
           set -euo pipefail
 
@@ -621,9 +675,12 @@ jobs:
               ArtifactsBucketName="$ARTIFACTS_BUCKET" \
               RegisterCodeKey="$register_key" \
               LoginCodeKey="$login_key" \
+              AuthorizerCodeKey="$authorizer_key" \
+              ProfileCodeKey="$profile_key" \
               RefreshTokensTableName="$REFRESH_TOKENS_TABLE" \
               DatabaseUsername="$DATABASE_USERNAME" \
               DatabaseHost="$DATABASE_HOST" \
+              AccessTokensTableName="$ACCESS_TOKENS_TABLE" \
             --region "$REGION" \
             --capabilities CAPABILITY_NAMED_IAM \
             --no-fail-on-empty-changeset

@@ -148,6 +148,23 @@ Resources:
       SSESpecification:
         SSEEnabled: true
 
+  AccessTokensTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub '${ProjectName}-${Environment}-access-tokens'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: jti
+          AttributeType: S
+      KeySchema:
+        - AttributeName: jti
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: expiryTimestamp
+        Enabled: true
+      SSESpecification:
+        SSEEnabled: true
+
   PrivateFilesBucket:
     Type: AWS::S3::Bucket
     Properties:
@@ -205,6 +222,9 @@ Outputs:
     Value: !Ref RefreshTokensTable
   NotificationDispatchTableName:
     Value: !Ref NotificationDispatchTable
+  AccessTokensTableName:
+    Description: DynamoDB table for access token records
+    Value: !Ref AccessTokensTable
   PrivateFilesBucketName:
     Value: !Ref PrivateFilesBucket
   DeploymentArtifactsBucketName:

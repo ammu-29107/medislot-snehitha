@@ -180,6 +180,7 @@ def handler(event, context):
                 if not isinstance(phone_number, str) or len(phone_number) > 20:
                     return response(400, {"message": "Invalid phoneNumber"})
 
+
         # Hash before storing; plaintext passwords are never persisted.
         password_hash = bcrypt.hashpw(
             password.encode("utf-8"),
@@ -189,43 +190,45 @@ def handler(event, context):
         connection = get_db_connection()
 
         with connection.cursor() as cursor:
-            cursor.execute(
-                """
-                INSERT INTO users (role, full_name, email)
-                VALUES (%s, %s, %s)
-                """,
-                (role, full_name, email),
-            )
-            user_id = cursor.lastrowid
-
-            cursor.execute(
-                """
-                INSERT INTO user_credentials (user_id, password_hash)
-                VALUES (%s, %s)
-                """,
-                (user_id, password_hash),
-            )
-
             if role == "DOCTOR":
                 cursor.execute(
                     """
-                    INSERT INTO doctor_profiles
-                        (user_id, specialization, license_number)
-                    VALUES (%s, %s, %s)
+                    INSERT INTO doctors (
+                        full_name, email, password_hash,
+                        specialization, license_number
+                    )
+                    VALUES (%s, %s, %s, %s, %s)
                     """,
-                    (user_id, specialization, license_number),
+                    (
+                        full_name,
+                        email,
+                        password_hash,
+                        specialization,
+                        license_number,
+                    ),
                 )
             else:
                 cursor.execute(
                     """
-                    INSERT INTO patient_profiles
-                        (user_id, date_of_birth, phone_number)
-                    VALUES (%s, %s, %s)
+                    INSERT INTO patients (
+                        full_name, email, password_hash,
+                        date_of_birth, phone_number
+                    )
+                    VALUES (%s, %s, %s, %s, %s)
                     """,
-                    (user_id, date_of_birth, phone_number),
+                    (
+                        full_name,
+                        email,
+                        password_hash,
+                        date_of_birth,
+                        phone_number,
+                    ),
                 )
 
+            user_id = cursor.lastrowid
+
         connection.commit()
+
 
         logger.info(json.dumps({
             "event": "registration_succeeded",

@@ -41,6 +41,9 @@ DB_PASSWORD = ssm.get_parameter(
 dynamodb = boto3.resource("dynamodb", region_name=AWS_REGION)
 refresh_table = dynamodb.Table(REFRESH_TOKENS_TABLE)
 
+ACCESS_TOKENS_TABLE_NAME = os.environ["ACCESS_TOKENS_TABLE"]
+access_table = dynamodb.Table(ACCESS_TOKENS_TABLE_NAME)
+
 # Loaded at Lambda cold start; never log or return this value.
 JWT_SECRET = ssm.get_parameter(
     Name=JWT_SECRET_PARAMETER,
@@ -122,31 +125,48 @@ def handler(event, context):
         ):
             return response(400, {"message": "Invalid login input"})
 
+
+        route_key = event.get("routeKey", "")
+        raw_path = event.get("rawPath", "")
+        path = (route_key.split(" ")[-1] if route_key else raw_path)
+        path = path.rstrip("/").lower()
+
+        if path.endswith("/login/doctor"):
+            role = "DOCTOR"
+            table = "doctors"
+            id_column = "doctor_id"
+        elif path.endswith("/login/patient"):
+            role = "PATIENT"
+            table = "patients"
+            id_column = "patient_id"
+        else:
+            return response(404, {"message": "Login route not found"})
+
+
         connection = get_db_connection()
 
         with connection.cursor() as cursor:
-            cursor.execute(
-                """
-                SELECT u.user_id, u.role, u.status, c.password_hash
-                FROM users AS u
-                JOIN user_credentials AS c ON c.user_id = u.user_id
-                WHERE u.email = %s
+
+            query = f"""
+                SELECT {id_column}, status, password_hash
+                FROM {table}
+                WHERE email = %s
                 LIMIT 1
-                """,
-                (email,),
-            )
+            """
+            cursor.execute(query, (email,))
             user = cursor.fetchone()
 
         # Use a generic error for unknown email and wrong password.
         if (
             not user
-            or user[2] != "ACTIVE"
+            or user[1] != "ACTIVE"
             or not bcrypt.checkpw(
                 password.encode("utf-8"),
-                user[3].encode("utf-8"),
+                user[2].encode("utf-8"),
             )
         ):
             return response(401, {"message": "Invalid email or password"})
+
 
         now = int(time.time())
         access_jti = str(uuid.uuid4())
@@ -155,7 +175,7 @@ def handler(event, context):
         access_token = jwt.encode(
             {
                 "sub": str(user[0]),
-                "role": user[1],
+                "role": role,
                 "iss": JWT_ISSUER,
                 "aud": JWT_AUDIENCE,
                 "iat": now,
@@ -171,11 +191,23 @@ def handler(event, context):
             refresh_token.encode("utf-8")
         ).hexdigest()
 
+        access_table.put_item(
+            Item={
+                "jti": access_jti,
+                "userId": str(user[0]),
+                "role": role,
+                "expiryTimestamp": access_expiry,
+                "createdAt": now,
+                "revoked": False,
+            },
+            ConditionExpression="attribute_not_exists(jti)",
+        )
+
         refresh_table.put_item(
             Item={
                 "tokenHash": refresh_token_hash,
                 "userId": str(user[0]),
-                "role": user[1],
+                "role": role,
                 "expiryTimestamp": now + REFRESH_TOKEN_TTL_SECONDS,
                 "createdAt": now,
                 "revoked": False,
@@ -187,7 +219,7 @@ def handler(event, context):
             "event": "login_succeeded",
             "correlation_id": correlation_id,
             "user_id": str(user[0]),
-            "role": user[1],
+            "role": role,
         }))
 
         return response(200, {
