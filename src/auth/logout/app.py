@@ -95,15 +95,12 @@ def handler(event, context):
                         "Key": {"tokenHash": {"S": token_hash}},
                         "UpdateExpression": "SET revoked = :true",
                         "ConditionExpression": (
-                            "userId = :user_id "
-                            "AND revoked = :false "
-                            "AND expiryTimestamp > :now"
+                            "userId = :user_id AND revoked = :false"
                         ),
                         "ExpressionAttributeValues": {
                             ":true": {"BOOL": True},
                             ":false": {"BOOL": False},
                             ":user_id": {"S": user_id},
-                            ":now": {"N": str(now)},
                         },
                     }
                 },
