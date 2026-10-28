@@ -1,0 +1,461 @@
+
+AWSTemplateFormatVersion: '2010-09-09'
+Description: MediSlot authentication API - registration and login
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: medislot
+
+  Environment:
+    Type: String
+    Default: dev
+
+  NetworkStackName:
+    Type: String
+    Default: medislot-dev
+
+  ArtifactsBucketName:
+    Type: String
+    Default: medislot-dev-790574019399-artifacts
+
+  RegisterCodeKey:
+    Type: String
+    Description: S3 key for the packaged registration Lambda ZIP
+
+  LoginCodeKey:
+    Type: String
+    Description: S3 key for the packaged login Lambda ZIP
+
+  AuthorizerCodeKey:
+    Type: String
+    Description: S3 key for the packaged authorizer Lambda ZIP
+
+  ProfileCodeKey:
+    Type: String
+    Description: S3 key for the packaged profile Lambda ZIP
+
+  RefreshCodeKey:
+    Type: String
+    Description: S3 key for the packaged refresh Lambda ZIP
+
+  LogoutCodeKey:
+    Type: String
+    Description: S3 key for the packaged logout Lambda ZIP
+
+  RefreshTokensTableName:
+    Type: String
+    Description: Name of the existing refresh-token DynamoDB table
+
+  DatabaseUsername:
+    Type: String
+    Description: Database username provided by the data stack
+
+  DatabaseHost:
+    Type: String
+    Description: Endpoint hostname of the existing RDS database
+
+  AccessTokensTableName:
+    Type: String
+    Description: DynamoDB table for access token records
+
+Resources:
+  AuthLambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectName}-${Environment}-auth-lambda-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: AuthLambdaRuntimeAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: WriteLambdaLogs
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: '*'
+
+              - Sid: ManageLambdaNetworkInterfaces
+                Effect: Allow
+                Action:
+                  - ec2:CreateNetworkInterface
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DescribeSubnets
+                  - ec2:DeleteNetworkInterface
+                  - ec2:AssignPrivateIpAddresses
+                  - ec2:UnassignPrivateIpAddresses
+                Resource: '*'
+
+              - Sid: ReadRuntimeSecrets
+                Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/medislot/${Environment}/database/password'
+                  - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/medislot/${Environment}/auth/jwt-signing-secret'
+
+              - Sid: RefreshTokenTableAccess
+                Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:GetItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:TransactWriteItems
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${RefreshTokensTableName}'
+                  - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AccessTokensTableName}'
+
+  RegisterFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${ProjectName}-${Environment}-auth-register'
+      Runtime: python3.12
+      Handler: app.handler
+      Role: !GetAtt AuthLambdaExecutionRole.Arn
+      Timeout: 15
+      MemorySize: 256
+      Code:
+        S3Bucket: !Ref ArtifactsBucketName
+        S3Key: !Ref RegisterCodeKey
+      VpcConfig:
+        SecurityGroupIds:
+          - Fn::ImportValue:
+              Fn::Sub: '${NetworkStackName}-LambdaSecurityGroupId'
+        SubnetIds:
+          - Fn::ImportValue:
+              Fn::Sub: '${NetworkStackName}-PrivateSubnetAId'
+          - Fn::ImportValue:
+              Fn::Sub: '${NetworkStackName}-PrivateSubnetBId'
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref Environment
+          DB_HOST: !Ref DatabaseHost
+          DB_PORT: '3306'
+          DB_NAME: medislot
+          DB_USER: !Ref DatabaseUsername
+          DB_PASSWORD_PARAMETER: !Sub '/medislot/${Environment}/database/password'
+          LOG_LEVEL: INFO
+
+  LoginFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${ProjectName}-${Environment}-auth-login'
+      Runtime: python3.12
+      Handler: app.handler
+      Role: !GetAtt AuthLambdaExecutionRole.Arn
+      Timeout: 15
+      MemorySize: 256
+      Code:
+        S3Bucket: !Ref ArtifactsBucketName
+        S3Key: !Ref LoginCodeKey
+      VpcConfig:
+        SecurityGroupIds:
+          - Fn::ImportValue:
+              Fn::Sub: '${NetworkStackName}-LambdaSecurityGroupId'
+        SubnetIds:
+          - Fn::ImportValue:
+              Fn::Sub: '${NetworkStackName}-PrivateSubnetAId'
+          - Fn::ImportValue:
+              Fn::Sub: '${NetworkStackName}-PrivateSubnetBId'
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref Environment
+          DB_HOST: !Ref DatabaseHost
+          DB_PORT: '3306'
+          DB_NAME: medislot
+          DB_USER: !Ref DatabaseUsername
+          DB_PASSWORD_PARAMETER: !Sub '/medislot/${Environment}/database/password'
+          JWT_SECRET_PARAMETER: !Sub '/medislot/${Environment}/auth/jwt-signing-secret'
+          REFRESH_TOKENS_TABLE: !Ref RefreshTokensTableName
+          JWT_ISSUER: medislot
+          JWT_AUDIENCE: medislot-api
+          ACCESS_TOKEN_TTL_SECONDS: '900'
+          REFRESH_TOKEN_TTL_SECONDS: '604800'
+          LOG_LEVEL: INFO
+          ACCESS_TOKENS_TABLE: !Ref AccessTokensTableName
+
+  AuthorizerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${ProjectName}-${Environment}-auth-authorizer'
+      Runtime: python3.12
+      Handler: app.handler
+      Role: !GetAtt AuthLambdaExecutionRole.Arn
+      Timeout: 10
+      MemorySize: 128
+      Code:
+        S3Bucket: !Ref ArtifactsBucketName
+        S3Key: !Ref AuthorizerCodeKey
+      Environment:
+        Variables:
+          JWT_SECRET_PARAMETER: !Sub '/medislot/${Environment}/auth/jwt-signing-secret'
+          ACCESS_TOKENS_TABLE: !Ref AccessTokensTableName
+          JWT_ISSUER: medislot
+          JWT_AUDIENCE: medislot-api
+          LOG_LEVEL: INFO
+
+  ProfileFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${ProjectName}-${Environment}-auth-profile'
+      Runtime: python3.12
+      Handler: app.handler
+      Role: !GetAtt AuthLambdaExecutionRole.Arn
+      Timeout: 15
+      MemorySize: 256
+      Code:
+        S3Bucket: !Ref ArtifactsBucketName
+        S3Key: !Ref ProfileCodeKey
+      VpcConfig:
+        SecurityGroupIds:
+          - Fn::ImportValue:
+              Fn::Sub: '${NetworkStackName}-LambdaSecurityGroupId'
+        SubnetIds:
+          - Fn::ImportValue:
+              Fn::Sub: '${NetworkStackName}-PrivateSubnetAId'
+          - Fn::ImportValue:
+              Fn::Sub: '${NetworkStackName}-PrivateSubnetBId'
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref Environment
+          DB_HOST: !Ref DatabaseHost
+          DB_PORT: '3306'
+          DB_NAME: medislot
+          DB_USER: !Ref DatabaseUsername
+          DB_PASSWORD_PARAMETER: !Sub '/medislot/${Environment}/database/password'
+          LOG_LEVEL: INFO
+
+  RefreshFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${ProjectName}-${Environment}-auth-refresh'
+      Runtime: python3.12
+      Handler: app.handler
+      Role: !GetAtt AuthLambdaExecutionRole.Arn
+      Timeout: 15
+      MemorySize: 256
+      Code:
+        S3Bucket: !Ref ArtifactsBucketName
+        S3Key: !Ref RefreshCodeKey
+      Environment:
+        Variables:
+          JWT_SECRET_PARAMETER: !Sub '/medislot/${Environment}/auth/jwt-signing-secret'
+          REFRESH_TOKENS_TABLE: !Ref RefreshTokensTableName
+          ACCESS_TOKENS_TABLE: !Ref AccessTokensTableName
+          JWT_ISSUER: medislot
+          JWT_AUDIENCE: medislot-api
+          ACCESS_TOKEN_TTL_SECONDS: '900'
+          REFRESH_TOKEN_TTL_SECONDS: '604800'
+          LOG_LEVEL: INFO
+
+  LogoutFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${ProjectName}-${Environment}-auth-logout'
+      Runtime: python3.12
+      Handler: app.handler
+      Role: !GetAtt AuthLambdaExecutionRole.Arn
+      Timeout: 15
+      MemorySize: 128
+      Code:
+        S3Bucket: !Ref ArtifactsBucketName
+        S3Key: !Ref LogoutCodeKey
+      Environment:
+        Variables:
+          ACCESS_TOKENS_TABLE: !Ref AccessTokensTableName
+          REFRESH_TOKENS_TABLE: !Ref RefreshTokensTableName
+          LOG_LEVEL: INFO
+
+  AuthHttpApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: !Sub '${ProjectName}-${Environment}-auth-api'
+      ProtocolType: HTTP
+      Description: MediSlot registration and login API
+
+  AuthRequestAuthorizer:
+    Type: AWS::ApiGatewayV2::Authorizer
+    Properties:
+      ApiId: !Ref AuthHttpApi
+      Name: !Sub '${ProjectName}-${Environment}-request-authorizer'
+      AuthorizerType: REQUEST
+      AuthorizerUri: !Sub
+        - 'arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AuthorizerArn}/invocations'
+        - AuthorizerArn: !GetAtt AuthorizerFunction.Arn
+      AuthorizerPayloadFormatVersion: '2.0'
+      EnableSimpleResponses: true
+      IdentitySource:
+        - '$request.header.Authorization'
+
+  RegisterIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref AuthHttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt RegisterFunction.Arn
+      PayloadFormatVersion: '2.0'
+
+  LoginIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref AuthHttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt LoginFunction.Arn
+      PayloadFormatVersion: '2.0'
+
+  ProfileIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref AuthHttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt ProfileFunction.Arn
+      PayloadFormatVersion: '2.0'
+
+  RefreshIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref AuthHttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt RefreshFunction.Arn
+      PayloadFormatVersion: '2.0'
+
+  LogoutIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref AuthHttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt LogoutFunction.Arn
+      PayloadFormatVersion: '2.0'
+
+  RegisterDoctorRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref AuthHttpApi
+      RouteKey: 'POST /register/doctor'
+      Target: !Sub 'integrations/${RegisterIntegration}'
+
+  RegisterPatientRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref AuthHttpApi
+      RouteKey: 'POST /register/patient'
+      Target: !Sub 'integrations/${RegisterIntegration}'
+
+  LoginDoctorRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref AuthHttpApi
+      RouteKey: 'POST /login/doctor'
+      Target: !Sub 'integrations/${LoginIntegration}'
+
+  LoginPatientRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref AuthHttpApi
+      RouteKey: 'POST /login/patient'
+      Target: !Sub 'integrations/${LoginIntegration}'
+
+  ProfileRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref AuthHttpApi
+      RouteKey: 'GET /profile'
+      Target: !Sub 'integrations/${ProfileIntegration}'
+      AuthorizationType: CUSTOM
+      AuthorizerId: !Ref AuthRequestAuthorizer
+
+  RefreshRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref AuthHttpApi
+      RouteKey: 'POST /refresh'
+      Target: !Sub 'integrations/${RefreshIntegration}'
+      AuthorizationType: NONE
+
+  LogoutRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref AuthHttpApi
+      RouteKey: 'POST /logout'
+      Target: !Sub 'integrations/${LogoutIntegration}'
+      AuthorizationType: CUSTOM
+      AuthorizerId: !Ref AuthRequestAuthorizer
+
+  AuthApiStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref AuthHttpApi
+      StageName: '$default'
+      AutoDeploy: true
+
+  RegisterInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref RegisterFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${AuthHttpApi}/*/POST/register/*'
+
+  LoginInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref LoginFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${AuthHttpApi}/*/POST/login/*'
+
+  ProfileInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ProfileFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${AuthHttpApi}/*/GET/profile'
+
+  RefreshInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref RefreshFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${AuthHttpApi}/*/POST/refresh'
+
+  LogoutInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref LogoutFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${AuthHttpApi}/*/POST/logout'
+
+  AuthorizerInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref AuthorizerFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${AuthHttpApi}/authorizers/*'
+
+Outputs:
+  AuthApiEndpoint:
+    Description: Base URL for the authentication HTTP API
+    Value: !GetAtt AuthHttpApi.ApiEndpoint
+
+  RegisterFunctionName:
+    Value: !Ref RegisterFunction
+
+  LoginFunctionName:
+    Value: !Ref LoginFunction
+
+  AuthLambdaExecutionRoleArn:
+    Value: !GetAtt AuthLambdaExecutionRole.Arn
