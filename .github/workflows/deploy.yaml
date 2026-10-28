@@ -148,21 +148,13 @@ jobs:
             --overwrite
 
       - name: Deploy data stack
-        env:
-          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
         run: |
-          if [ -z "$DB_PASSWORD" ]; then
-            echo "DB_PASSWORD GitHub secret is missing."
-            exit 1
-          fi
-
           aws cloudformation deploy \
             --template-file cloudformation/data.yaml \
             --stack-name "${{ steps.config.outputs.stack_prefix }}-data" \
             --parameter-overrides \
               ProjectName="$(jq -r '.ProjectName' config.json)" \
               Environment="$(jq -r '.Environment' config.json)" \
-              DBPassword="$DB_PASSWORD" \
             --region "${{ steps.config.outputs.region }}" \
             --capabilities CAPABILITY_NAMED_IAM \
             --no-fail-on-empty-changeset
@@ -588,6 +580,46 @@ jobs:
             zip -qr "$RUNNER_TEMP/profile.zip" .
           )
 
+      - name: Package refresh Lambda
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          PACKAGE_DIR="$RUNNER_TEMP/refresh-package"
+          mkdir -p "$PACKAGE_DIR"
+
+          python -m pip install \
+            --disable-pip-version-check \
+            -r src/auth/refresh/requirements.txt \
+            --target "$PACKAGE_DIR"
+
+          cp src/auth/refresh/app.py "$PACKAGE_DIR/app.py"
+
+          (
+            cd "$PACKAGE_DIR"
+            zip -qr "$RUNNER_TEMP/refresh.zip" .
+          )
+
+      - name: Package logout Lambda
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          PACKAGE_DIR="$RUNNER_TEMP/logout-package"
+          mkdir -p "$PACKAGE_DIR"
+
+          python -m pip install \
+            --disable-pip-version-check \
+            -r src/auth/logout/requirements.txt \
+            --target "$PACKAGE_DIR"
+
+          cp src/auth/logout/app.py "$PACKAGE_DIR/app.py"
+
+          (
+            cd "$PACKAGE_DIR"
+            zip -qr "$RUNNER_TEMP/logout.zip" .
+          )
+
       - name: Read deployed data-stack outputs
         id: data
         shell: bash
@@ -632,6 +664,8 @@ jobs:
           LOGIN_KEY="lambda/auth/login-${GITHUB_SHA}.zip"
           AUTHORIZER_KEY="lambda/auth/authorizer-${GITHUB_SHA}.zip"
           PROFILE_KEY="lambda/auth/profile-${GITHUB_SHA}.zip"
+          REFRESH_KEY="lambda/auth/refresh-${GITHUB_SHA}.zip"
+          LOGOUT_KEY="lambda/auth/logout-${GITHUB_SHA}.zip"
 
           aws s3 cp "$RUNNER_TEMP/register.zip" \
             "s3://${ARTIFACTS_BUCKET}/${REGISTER_KEY}"
@@ -645,10 +679,18 @@ jobs:
           aws s3 cp "$RUNNER_TEMP/profile.zip" \
             "s3://${ARTIFACTS_BUCKET}/${PROFILE_KEY}"
 
+          aws s3 cp "$RUNNER_TEMP/refresh.zip" \
+            "s3://${ARTIFACTS_BUCKET}/${REFRESH_KEY}"
+
+          aws s3 cp "$RUNNER_TEMP/logout.zip" \
+            "s3://${ARTIFACTS_BUCKET}/${LOGOUT_KEY}"
+
           echo "register_key=${REGISTER_KEY}" >> "$GITHUB_ENV"
           echo "login_key=${LOGIN_KEY}" >> "$GITHUB_ENV"
           echo "authorizer_key=${AUTHORIZER_KEY}" >> "$GITHUB_ENV"
           echo "profile_key=${PROFILE_KEY}" >> "$GITHUB_ENV"
+          echo "refresh_key=${REFRESH_KEY}" >> "$GITHUB_ENV"
+          echo "logout_key=${LOGOUT_KEY}" >> "$GITHUB_ENV"
 
       - name: Deploy authentication stack
         shell: bash
@@ -677,6 +719,8 @@ jobs:
               LoginCodeKey="$login_key" \
               AuthorizerCodeKey="$authorizer_key" \
               ProfileCodeKey="$profile_key" \
+              RefreshCodeKey="$refresh_key" \
+              LogoutCodeKey="$logout_key" \
               RefreshTokensTableName="$REFRESH_TOKENS_TABLE" \
               DatabaseUsername="$DATABASE_USERNAME" \
               DatabaseHost="$DATABASE_HOST" \

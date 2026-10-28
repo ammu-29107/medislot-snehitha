@@ -17,12 +17,6 @@ Parameters:
     Default: medislotadmin
     MinLength: 1
     MaxLength: 16
-  DBPassword:
-    Type: String
-    NoEcho: true
-    MinLength: 12
-    MaxLength: 41
-    Description: Supply securely at deployment time; never commit a real password.
 
 Resources:
   DatabaseSubnetGroup:
@@ -51,7 +45,7 @@ Resources:
       StorageEncrypted: true
       DBName: medislot
       MasterUsername: !Ref DBUsername
-      MasterUserPassword: !Ref DBPassword
+      MasterUserPassword: !Sub '{{resolve:ssm-secure:/${ProjectName}/${Environment}/database/password}}'
       DBSubnetGroupName: !Ref DatabaseSubnetGroup
       VPCSecurityGroups:
         - Fn::ImportValue:

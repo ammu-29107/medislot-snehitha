@@ -85,6 +85,7 @@ def handler(event, context):
             "context": {
                 "userId": str(user_id),
                 "role": role,
+                "jti": jti,
             },
         }
 

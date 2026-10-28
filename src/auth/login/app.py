@@ -31,7 +31,7 @@ ACCESS_TOKEN_TTL_SECONDS = int(
     os.environ.get("ACCESS_TOKEN_TTL_SECONDS", "900")
 )
 REFRESH_TOKEN_TTL_SECONDS = int(
-    os.environ.get("REFRESH_TOKEN_TTL_SECONDS", "2592000")
+    os.environ.get("REFRESH_TOKEN_TTL_SECONDS", "604800")
 )
 DB_PASSWORD = ssm.get_parameter(
     Name=DB_PASSWORD_PARAMETER,

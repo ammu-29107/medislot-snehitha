@@ -35,6 +35,14 @@ Parameters:
     Type: String
     Description: S3 key for the packaged profile Lambda ZIP
 
+  RefreshCodeKey:
+    Type: String
+    Description: S3 key for the packaged refresh Lambda ZIP
+
+  LogoutCodeKey:
+    Type: String
+    Description: S3 key for the packaged logout Lambda ZIP
+
   RefreshTokensTableName:
     Type: String
     Description: Name of the existing refresh-token DynamoDB table
@@ -102,6 +110,7 @@ Resources:
                   - dynamodb:GetItem
                   - dynamodb:UpdateItem
                   - dynamodb:DeleteItem
+                  - dynamodb:TransactWriteItems
                 Resource:
                   - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${RefreshTokensTableName}'
                   - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AccessTokensTableName}'
@@ -171,7 +180,7 @@ Resources:
           JWT_ISSUER: medislot
           JWT_AUDIENCE: medislot-api
           ACCESS_TOKEN_TTL_SECONDS: '900'
-          REFRESH_TOKEN_TTL_SECONDS: '2592000'
+          REFRESH_TOKEN_TTL_SECONDS: '604800'
           LOG_LEVEL: INFO
           ACCESS_TOKENS_TABLE: !Ref AccessTokensTableName
 
@@ -226,6 +235,47 @@ Resources:
           DB_PASSWORD_PARAMETER: !Sub '/medislot/${Environment}/database/password'
           LOG_LEVEL: INFO
 
+  RefreshFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${ProjectName}-${Environment}-auth-refresh'
+      Runtime: python3.12
+      Handler: app.handler
+      Role: !GetAtt AuthLambdaExecutionRole.Arn
+      Timeout: 15
+      MemorySize: 256
+      Code:
+        S3Bucket: !Ref ArtifactsBucketName
+        S3Key: !Ref RefreshCodeKey
+      Environment:
+        Variables:
+          JWT_SECRET_PARAMETER: !Sub '/medislot/${Environment}/auth/jwt-signing-secret'
+          REFRESH_TOKENS_TABLE: !Ref RefreshTokensTableName
+          ACCESS_TOKENS_TABLE: !Ref AccessTokensTableName
+          JWT_ISSUER: medislot
+          JWT_AUDIENCE: medislot-api
+          ACCESS_TOKEN_TTL_SECONDS: '900'
+          REFRESH_TOKEN_TTL_SECONDS: '604800'
+          LOG_LEVEL: INFO
+
+  LogoutFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${ProjectName}-${Environment}-auth-logout'
+      Runtime: python3.12
+      Handler: app.handler
+      Role: !GetAtt AuthLambdaExecutionRole.Arn
+      Timeout: 15
+      MemorySize: 128
+      Code:
+        S3Bucket: !Ref ArtifactsBucketName
+        S3Key: !Ref LogoutCodeKey
+      Environment:
+        Variables:
+          ACCESS_TOKENS_TABLE: !Ref AccessTokensTableName
+          REFRESH_TOKENS_TABLE: !Ref RefreshTokensTableName
+          LOG_LEVEL: INFO
+
   AuthHttpApi:
     Type: AWS::ApiGatewayV2::Api
     Properties:
@@ -271,6 +321,22 @@ Resources:
       IntegrationUri: !GetAtt ProfileFunction.Arn
       PayloadFormatVersion: '2.0'
 
+  RefreshIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref AuthHttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt RefreshFunction.Arn
+      PayloadFormatVersion: '2.0'
+
+  LogoutIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref AuthHttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt LogoutFunction.Arn
+      PayloadFormatVersion: '2.0'
+
   RegisterDoctorRoute:
     Type: AWS::ApiGatewayV2::Route
     Properties:
@@ -308,6 +374,23 @@ Resources:
       AuthorizationType: CUSTOM
       AuthorizerId: !Ref AuthRequestAuthorizer
 
+  RefreshRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref AuthHttpApi
+      RouteKey: 'POST /refresh'
+      Target: !Sub 'integrations/${RefreshIntegration}'
+      AuthorizationType: NONE
+
+  LogoutRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref AuthHttpApi
+      RouteKey: 'POST /logout'
+      Target: !Sub 'integrations/${LogoutIntegration}'
+      AuthorizationType: CUSTOM
+      AuthorizerId: !Ref AuthRequestAuthorizer
+
   AuthApiStage:
     Type: AWS::ApiGatewayV2::Stage
     Properties:
@@ -338,6 +421,22 @@ Resources:
       Action: lambda:InvokeFunction
       Principal: apigateway.amazonaws.com
       SourceArn: !Sub 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${AuthHttpApi}/*/GET/profile'
+
+  RefreshInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref RefreshFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${AuthHttpApi}/*/POST/refresh'
+
+  LogoutInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref LogoutFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${AuthHttpApi}/*/POST/logout'
 
   AuthorizerInvokePermission:
     Type: AWS::Lambda::Permission
