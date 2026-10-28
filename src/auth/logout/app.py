@@ -110,6 +110,14 @@ def handler(event, context):
         return response(200, {"message": "Logged out successfully"})
 
     except client.exceptions.TransactionCanceledException:
+        reasons = [
+            reason.get("Code", "Unknown")
+            for reason in exc.response.get("CancellationReasons", [])
+        ]
+        logger.warning(
+            "Logout transaction canceled; reason codes: %s",
+            reasons,
+        )
         return response(
             401,
             {"message": "Session is invalid, expired, or already revoked"},
