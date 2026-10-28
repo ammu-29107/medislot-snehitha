@@ -80,6 +80,29 @@ def handler(event, context):
             len(jti) if isinstance(jti, str) else None,
         )
 
+        key_check = client.get_item(
+            TableName=access_tokens.name,
+            Key={"jti": {"S": jti}},
+            ConsistentRead=True,
+        )
+        logger.info(
+            "Logout direct key check: key_accepted=True, record_found=%s",
+            "Item" in key_check,
+        )
+
+        logger.info(
+            "Logout transaction key diagnostics: "
+            "jti_type=%s, jti_length=%s, "
+            "token_hash_type=%s, token_hash_length=%s, "
+            "access_table=%s, refresh_table=%s",
+            type(jti).__name__,
+            len(jti) if isinstance(jti, str) else None,
+            type(token_hash).__name__,
+            len(token_hash) if isinstance(token_hash, str) else None,
+            access_tokens.name,
+            refresh_tokens.name,
+        )
+
         client.transact_write_items(
             TransactItems=[
                 {
@@ -113,16 +136,6 @@ def handler(event, context):
                     }
                 },
             ]
-        )
-
-        key_check = client.get_item(
-            TableName=access_tokens.name,
-            Key={"jti": {"S": jti}},
-            ConsistentRead=True,
-        )
-        logger.info(
-            "Logout direct key check: key_accepted=True, record_found=%s",
-            "Item" in key_check,
         )
 
         return response(200, {"message": "Logged out successfully"})
