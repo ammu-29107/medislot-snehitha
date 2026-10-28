@@ -72,6 +72,14 @@ def handler(event, context):
         if int(refresh_record.get("expiryTimestamp", 0)) <= now:
             return response(401, {"message": "Refresh token has expired"})
 
+        logger.info(
+            "Logout access key diagnostic: table=%s, region=%s, jti_type=%s, jti_length=%s",
+            access_tokens.name,
+            client.meta.region_name,
+            type(jti).__name__,
+            len(jti) if isinstance(jti, str) else None,
+        )
+
         client.transact_write_items(
             TransactItems=[
                 {
