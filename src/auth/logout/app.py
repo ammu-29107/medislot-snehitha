@@ -115,8 +115,8 @@ def handler(event, context):
             for reason in exc.response.get("CancellationReasons", [])
         ]
         logger.warning(
-            "Logout transaction canceled; reason codes: %s",
-            reasons,
+            "Logout transaction cancellation details: %s",
+            exc.response.get("CancellationReasons", []),
         )
         return response(
             401,
