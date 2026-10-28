@@ -63,6 +63,10 @@ def handler(event, context):
             or refresh_record.get("revoked") is not False
         ):
             return response(401, {"message": "Refresh token is invalid or revoked"})
+        logger.info(
+            "Logout expiryTimestamp type: %s",
+            type(refresh_record.get("expiryTimestamp")).__name__,
+        )
 
         now = int(time.time())
         if int(refresh_record.get("expiryTimestamp", 0)) <= now:
