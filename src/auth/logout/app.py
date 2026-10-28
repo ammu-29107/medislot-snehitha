@@ -109,7 +109,7 @@ def handler(event, context):
 
         return response(200, {"message": "Logged out successfully"})
 
-    except client.exceptions.TransactionCanceledException:
+    except client.exceptions.TransactionCanceledException as exc:
         reasons = [
             reason.get("Code", "Unknown")
             for reason in exc.response.get("CancellationReasons", [])
