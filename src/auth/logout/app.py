@@ -80,16 +80,6 @@ def handler(event, context):
             len(jti) if isinstance(jti, str) else None,
         )
 
-        key_check = client.get_item(
-            TableName=access_tokens.name,
-            Key={"jti": {"S": jti}},
-            ConsistentRead=True,
-        )
-        logger.info(
-            "Logout direct key check: key_accepted=True, record_found=%s",
-            "Item" in key_check,
-        )
-
         logger.info(
             "Logout transaction key diagnostics: "
             "jti_type=%s, jti_length=%s, "
