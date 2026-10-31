@@ -169,6 +169,7 @@ def handler(event, context):
 
 
         now = int(time.time())
+        session_id = str(uuid.uuid4())
         access_jti = str(uuid.uuid4())
         access_expiry = now + ACCESS_TOKEN_TTL_SECONDS
 
@@ -176,6 +177,7 @@ def handler(event, context):
             {
                 "sub": str(user[0]),
                 "role": role,
+                "session_id": session_id,
                 "iss": JWT_ISSUER,
                 "aud": JWT_AUDIENCE,
                 "iat": now,
@@ -206,11 +208,12 @@ def handler(event, context):
         refresh_table.put_item(
             Item={
                 "tokenHash": refresh_token_hash,
+                "session_id": session_id,
                 "userId": str(user[0]),
                 "role": role,
+                "status": "ACTIVE",
                 "expiryTimestamp": now + REFRESH_TOKEN_TTL_SECONDS,
                 "createdAt": now,
-                "revoked": False,
             },
             ConditionExpression="attribute_not_exists(tokenHash)",
         )

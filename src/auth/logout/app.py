@@ -27,16 +27,13 @@ def response(status_code, body):
 
 
 def handler(event, context):
-    authorizer_context = (
-        event.get("requestContext", {})
-        .get("authorizer", {})
-        .get("lambda", {})
-    )
-
+    authorizer_context = event.get("requestContext", {}).get("authorizer", {}).get("lambda", {})
     jti = authorizer_context.get("jti")
     user_id = authorizer_context.get("userId")
+    session_id = authorizer_context.get("session_id")
+    role = authorizer_context.get("role")
 
-    if not jti or not user_id:
+    if not jti or not user_id or not session_id or not role:
         return response(401, {"message": "Unauthorized"})
 
     try:
@@ -59,10 +56,13 @@ def handler(event, context):
 
         if (
             not refresh_record
-            or refresh_record.get("userId") != user_id
-            or refresh_record.get("revoked") is not False
+            or str(refresh_record.get("userId")) != str(user_id)
+            or refresh_record.get("session_id") != session_id
+            or refresh_record.get("role") != role
+            or refresh_record.get("status") != "ACTIVE"
+            or int(refresh_record.get("expiryTimestamp", 0)) <= int(time.time())
         ):
-            return response(401, {"message": "Refresh token is invalid or revoked"})
+            return response(401, {"message": "Invalid refresh token"})
         logger.info(
             "Logout expiryTimestamp type: %s",
             type(refresh_record.get("expiryTimestamp")).__name__,
@@ -100,13 +100,11 @@ def handler(event, context):
                         "TableName": access_tokens.name,
                         "Key": {"jti": {"S": jti}},
                         "UpdateExpression": "SET revoked = :true",
-                        "ConditionExpression": (
-                            "userId = :user_id AND revoked = :false"
-                        ),
+                        "ConditionExpression": "userId = :user_id AND revoked = :false",
                         "ExpressionAttributeValues": {
                             ":true": {"BOOL": True},
                             ":false": {"BOOL": False},
-                            ":user_id": {"S": user_id},
+                            ":user_id": {"S": str(user_id)},
                         },
                     }
                 },
@@ -114,14 +112,20 @@ def handler(event, context):
                     "Update": {
                         "TableName": refresh_tokens.name,
                         "Key": {"tokenHash": {"S": token_hash}},
-                        "UpdateExpression": "SET revoked = :true",
+                        "UpdateExpression": "SET #status = :revoked, revokedAt = :now",
                         "ConditionExpression": (
-                            "userId = :user_id AND revoked = :false"
+                            "userId = :user_id AND session_id = :session_id "
+                            "AND #status = :active"
                         ),
+                        "ExpressionAttributeNames": {
+                            "#status": "status",
+                        },
                         "ExpressionAttributeValues": {
-                            ":true": {"BOOL": True},
-                            ":false": {"BOOL": False},
-                            ":user_id": {"S": user_id},
+                            ":revoked": {"S": "REVOKED"},
+                            ":active": {"S": "ACTIVE"},
+                            ":now": {"N": str(now)},
+                            ":user_id": {"S": str(user_id)},
+                            ":session_id": {"S": session_id},
                         },
                     }
                 },

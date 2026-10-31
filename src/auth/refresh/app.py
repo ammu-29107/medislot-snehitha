@@ -3,7 +3,6 @@ import json
 import time
 import uuid
 import hashlib
-import secrets
 import logging
 
 import boto3
@@ -68,13 +67,14 @@ def handler(event, context):
             return response(401, {"message": "Invalid refresh token"})
 
         if (
-            old_record.get("revoked", {}).get("BOOL", False)
+            old_record.get("status", {}).get("S") != "ACTIVE"
             or int(old_record["expiryTimestamp"]["N"]) <= now
         ):
             return response(401, {"message": "Invalid refresh token"})
 
         user_id = old_record["userId"]["S"]
         role = old_record["role"]["S"]
+        session_id = old_record["session_id"]["S"]
 
         if role not in ("DOCTOR", "PATIENT"):
             return response(401, {"message": "Invalid refresh token"})
@@ -85,6 +85,7 @@ def handler(event, context):
         claims = {
             "sub": user_id,
             "role": role,
+            "session_id": session_id,
             "iss": JWT_ISSUER,
             "aud": JWT_AUDIENCE,
             "iat": now,
@@ -95,65 +96,17 @@ def handler(event, context):
             claims, JWT_SECRET, algorithm="HS256"
         )
 
-        new_refresh_token = secrets.token_urlsafe(32)
-        new_hash = hashlib.sha256(
-            new_refresh_token.encode()
-        ).hexdigest()
-        refresh_expiry = now + REFRESH_TOKEN_TTL_SECONDS
-
-        # Atomically consume the old token and create both new records.
-        dynamodb.transact_write_items(
-            TransactItems=[
-                {
-                    "Update": {
-                        "TableName": REFRESH_TOKENS_TABLE,
-                        "Key": {"tokenHash": {"S": old_hash}},
-                        "UpdateExpression": "SET revoked = :true",
-                        "ConditionExpression": (
-                            "revoked = :false AND expiryTimestamp > :now"
-                        ),
-                        "ExpressionAttributeValues": {
-                            ":true": {"BOOL": True},
-                            ":false": {"BOOL": False},
-                            ":now": {"N": str(now)},
-                        },
-                    }
-                },
-                {
-                    "Put": {
-                        "TableName": REFRESH_TOKENS_TABLE,
-                        "Item": {
-                            "tokenHash": {"S": new_hash},
-                            "userId": {"S": user_id},
-                            "role": {"S": role},
-                            "expiryTimestamp": {
-                                "N": str(refresh_expiry)
-                            },
-                            "createdAt": {"N": str(now)},
-                            "revoked": {"BOOL": False},
-                        },
-                        "ConditionExpression": (
-                            "attribute_not_exists(tokenHash)"
-                        ),
-                    }
-                },
-                {
-                    "Put": {
-                        "TableName": ACCESS_TOKENS_TABLE,
-                        "Item": {
-                            "jti": {"S": access_jti},
-                            "userId": {"S": user_id},
-                            "role": {"S": role},
-                            "expiryTimestamp": {
-                                "N": str(access_expiry)
-                            },
-                            "createdAt": {"N": str(now)},
-                            "revoked": {"BOOL": False},
-                        },
-                        "ConditionExpression": "attribute_not_exists(jti)",
-                    }
-                },
-            ]
+        dynamodb.put_item(
+            TableName=ACCESS_TOKENS_TABLE,
+            Item={
+                "jti": {"S": access_jti},
+                "userId": {"S": user_id},
+                "role": {"S": role},
+                "expiryTimestamp": {"N": str(access_expiry)},
+                "createdAt": {"N": str(now)},
+                "revoked": {"BOOL": False},
+            },
+            ConditionExpression="attribute_not_exists(jti)",
         )
 
         return response(
@@ -162,13 +115,9 @@ def handler(event, context):
                 "accessToken": access_token,
                 "tokenType": "Bearer",
                 "expiresIn": ACCESS_TOKEN_TTL_SECONDS,
-                "refreshToken": new_refresh_token,
             },
         )
 
-    except dynamodb.exceptions.TransactionCanceledException:
-        # Another concurrent refresh may have consumed the old token.
-        return response(401, {"message": "Invalid or already-used refresh token"})
     except ClientError:
         logger.exception("Refresh-token operation failed")
         return response(500, {"message": "Unable to refresh tokens"})
