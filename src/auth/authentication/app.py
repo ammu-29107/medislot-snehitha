@@ -212,21 +212,29 @@ def handle_login(event, body, correlation_id):
             type(session_id).__name__,
         )
 
+        access_item = {
+            "jti": {"S": access_jti},
+            "userId": {"S": str(user_id)},
+            "role": {"S": role},
+            "expiryTimestamp": {"N": str(access_expiry)},
+            "createdAt": {"N": str(now)},
+            "revoked": {"BOOL": False},
+            "session_id": {"S": session_id},
+        }
+
+        logger.info(
+            "Access token item diagnostic: jti_type=%s, jti_value_type=%s",
+            type(access_item["jti"]).__name__,
+            type(access_item["jti"]["S"]).__name__,
+        )
+
         # Create all three records atomically.
         client.transact_write_items(
             TransactItems=[
                 {
                     "Put": {
                         "TableName": ACCESS_TOKENS_TABLE,
-                        "Item": {
-                            "jti": {"S": access_jti},
-                            "userId": {"S": str(user_id)},
-                            "role": {"S": role},
-                            "expiryTimestamp": {"N": str(access_expiry)},
-                            "createdAt": {"N": str(now)},
-                            "revoked": {"BOOL": False},
-                            "session_id": {"S": session_id},
-                        },
+                        "Item": access_item,
                         "ConditionExpression": "attribute_not_exists(jti)",
                     }
                 },
