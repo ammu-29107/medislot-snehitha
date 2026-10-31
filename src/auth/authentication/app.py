@@ -275,7 +275,27 @@ def handle_login(event, body, correlation_id):
             },
         )
 
-    except (BotoCoreError, ClientError):
+    except ClientError as exc:
+        error = exc.response.get("Error", {})
+
+        logger.error(
+            "Login dependency failed: code=%s message=%s",
+            error.get("Code"),
+            error.get("Message"),
+        )
+
+        if error.get("Code") == "TransactionCanceledException":
+            logger.error(
+                "DynamoDB transaction cancellation reasons: %s",
+                exc.response.get("CancellationReasons"),
+            )
+
+        return response(
+            503,
+            {"message": "Login is temporarily unavailable"},
+        )
+
+    except BotoCoreError:
         logger.exception("Login dependency failed")
         return response(
             503,
