@@ -203,6 +203,15 @@ def handle_login(event, body, correlation_id):
             refresh_token.encode("utf-8")
         ).hexdigest()
 
+        logger.info(
+            "Login transaction types: user_id=%s, access_jti=%s, "
+            "refresh_token_hash=%s, session_id=%s",
+            type(user_id).__name__,
+            type(access_jti).__name__,
+            type(refresh_token_hash).__name__,
+            type(session_id).__name__,
+        )
+
         # Create all three records atomically.
         client.transact_write_items(
             TransactItems=[
@@ -211,7 +220,7 @@ def handle_login(event, body, correlation_id):
                         "TableName": ACCESS_TOKENS_TABLE,
                         "Item": {
                             "jti": {"S": access_jti},
-                            "userId": {"S": user_id},
+                            "userId": {"S": str(user_id)},
                             "role": {"S": role},
                             "expiryTimestamp": {"N": str(access_expiry)},
                             "createdAt": {"N": str(now)},
@@ -227,7 +236,7 @@ def handle_login(event, body, correlation_id):
                         "Item": {
                             "tokenHash": {"S": refresh_token_hash},
                             "session_id": {"S": session_id},
-                            "userId": {"S": user_id},
+                            "userId": {"S": str(user_id)},
                             "role": {"S": role},
                             "status": {"S": "ACTIVE"},
                             "expiryTimestamp": {"N": str(session_expiry)},
@@ -243,7 +252,7 @@ def handle_login(event, body, correlation_id):
                         "TableName": SESSIONS_TABLE,
                         "Item": {
                             "session_id": {"S": session_id},
-                            "userId": {"S": user_id},
+                            "userId": {"S": str(user_id)},
                             "role": {"S": role},
                             "status": {"S": "ACTIVE"},
                             "expiryTimestamp": {"N": str(session_expiry)},
