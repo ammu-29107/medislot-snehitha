@@ -14,7 +14,6 @@ import bcrypt
 import jwt
 import pymysql
 from botocore.exceptions import BotoCoreError, ClientError
-from boto3.dynamodb.types import TypeSerializer
 
 
 logger = logging.getLogger()
@@ -25,15 +24,6 @@ AWS_REGION = os.environ.get("AWS_REGION", "ap-south-1")
 ssm = boto3.client("ssm", region_name=AWS_REGION)
 dynamodb = boto3.resource("dynamodb", region_name=AWS_REGION)
 client = dynamodb.meta.client
-
-serializer = TypeSerializer()
-
-
-def serialize_item(item):
-    return {
-        key: serializer.serialize(value)
-        for key, value in item.items()
-    }
 
 JWT_SECRET_PARAMETER = os.environ["JWT_SECRET_PARAMETER"]
 DB_PASSWORD_PARAMETER = os.environ["DB_PASSWORD_PARAMETER"]
@@ -226,52 +216,50 @@ def handle_login(event, body, correlation_id):
             {
                 "Put": {
                     "TableName": ACCESS_TOKENS_TABLE,
-                    "Item": serialize_item({
+                    "Item": {
                         "jti": access_jti,
-                        "userId": str(user_id),
+                        "userId": user_id,
                         "role": role,
                         "expiryTimestamp": access_expiry,
                         "createdAt": now,
                         "revoked": False,
                         "session_id": session_id,
-                    }),
+                    },
                     "ConditionExpression": "attribute_not_exists(jti)",
                 }
             },
             {
                 "Put": {
                     "TableName": REFRESH_TOKENS_TABLE,
-                    "Item": serialize_item({
+                    "Item": {
                         "tokenHash": refresh_token_hash,
                         "session_id": session_id,
-                        "userId": str(user_id),
+                        "userId": user_id,
                         "role": role,
                         "status": "ACTIVE",
                         "expiryTimestamp": session_expiry,
                         "createdAt": now,
-                    }),
+                    },
                     "ConditionExpression": "attribute_not_exists(tokenHash)",
                 }
             },
             {
                 "Put": {
                     "TableName": SESSIONS_TABLE,
-                    "Item": serialize_item({
+                    "Item": {
                         "session_id": session_id,
-                        "userId": str(user_id),
+                        "userId": user_id,
                         "role": role,
                         "status": "ACTIVE",
                         "expiryTimestamp": session_expiry,
                         "createdAt": now,
-                    }),
+                    },
                     "ConditionExpression": "attribute_not_exists(session_id)",
                 }
             },
         ]
 
-        client.transact_write_items(
-            TransactItems=transaction_items
-        )
+        client.transact_write_items(TransactItems=transaction_items)
 
         logger.info(json.dumps({
             "event": "login_succeeded",
@@ -491,79 +479,78 @@ def handle_logout(event, body):
 
         # Revoke the access token, refresh token and entire session atomically.
         client.transact_write_items(
-            TransactItems=[
-                {
-                    "Update": {
-                        "TableName": ACCESS_TOKENS_TABLE,
-                        "Key": {"jti": {"S": jti}},
-                        "UpdateExpression": "SET revoked = :true",
-                        "ConditionExpression": (
-                            "userId = :user_id "
-                            "AND role = :role "
-                            "AND revoked = :false"
-                        ),
-                        "ExpressionAttributeValues": {
-                            ":true": {"BOOL": True},
-                            ":false": {"BOOL": False},
-                            ":user_id": {"S": str(user_id)},
-                            ":role": {"S": role},
-                        },
-                    }
-                },
-                {
-                    "Update": {
-                        "TableName": REFRESH_TOKENS_TABLE,
-                        "Key": {"tokenHash": {"S": token_hash}},
-                        "UpdateExpression": (
-                            "SET #status = :revoked, revokedAt = :now"
-                        ),
-                        "ConditionExpression": (
-                            "userId = :user_id "
-                            "AND session_id = :session_id "
-                            "AND role = :role "
-                            "AND #status = :active "
-                            "AND expiryTimestamp > :now"
-                        ),
-                        "ExpressionAttributeNames": {
-                            "#status": "status",
-                        },
-                        "ExpressionAttributeValues": {
-                            ":revoked": {"S": "REVOKED"},
-                            ":active": {"S": "ACTIVE"},
-                            ":now": {"N": str(now)},
-                            ":user_id": {"S": str(user_id)},
-                            ":session_id": {"S": session_id},
-                            ":role": {"S": role},
-                        },
-                    }
-                },
-                {
-                    "Update": {
-                        "TableName": SESSIONS_TABLE,
-                        "Key": {"session_id": {"S": session_id}},
-                        "UpdateExpression": (
-                            "SET #status = :revoked, revokedAt = :now"
-                        ),
-                        "ConditionExpression": (
-                            "userId = :user_id "
-                            "AND role = :role "
-                            "AND #status = :active "
-                            "AND expiryTimestamp > :now"
-                        ),
-                        "ExpressionAttributeNames": {
-                            "#status": "status",
-                        },
-                        "ExpressionAttributeValues": {
-                            ":revoked": {"S": "REVOKED"},
-                            ":active": {"S": "ACTIVE"},
-                            ":now": {"N": str(now)},
-                            ":user_id": {"S": str(user_id)},
-                            ":role": {"S": role},
-                        },
-                    }
-                },
-            ]
-        )
+        TransactItems=[
+            {
+                "Update": {
+                    "TableName": ACCESS_TOKENS_TABLE,
+                    "Key": {"jti": jti},
+                    "UpdateExpression": "SET revoked = :true",
+                    "ConditionExpression": (
+                        "userId = :user_id "
+                        "AND #role = :role "
+                        "AND revoked = :false"
+                    ),
+                    "ExpressionAttributeNames": {"#role": "role"},
+                    "ExpressionAttributeValues": {
+                        ":true": True,
+                        ":false": False,
+                        ":user_id": str(user_id),
+                        ":role": role,
+                    },
+                }
+            },
+            {
+                "Update": {
+                    "TableName": REFRESH_TOKENS_TABLE,
+                    "Key": {"tokenHash": token_hash},
+                    "UpdateExpression": "SET #status = :revoked, revokedAt = :now",
+                    "ConditionExpression": (
+                        "userId = :user_id "
+                        "AND session_id = :session_id "
+                        "AND #role = :role "
+                        "AND #status = :active "
+                        "AND expiryTimestamp > :now"
+                    ),
+                    "ExpressionAttributeNames": {
+                        "#status": "status",
+                        "#role": "role",
+                    },
+                    "ExpressionAttributeValues": {
+                        ":revoked": "REVOKED",
+                        ":active": "ACTIVE",
+                        ":now": now,
+                        ":user_id": str(user_id),
+                        ":session_id": session_id,
+                        ":role": role,
+                    },
+                }
+            },
+            {
+                "Update": {
+                    "TableName": SESSIONS_TABLE,
+                    "Key": {"session_id": session_id},
+                    "UpdateExpression": "SET #status = :revoked, revokedAt = :now",
+                    "ConditionExpression": (
+                        "userId = :user_id "
+                        "AND #role = :role "
+                        "AND #status = :active "
+                        "AND expiryTimestamp > :now"
+                    ),
+                    "ExpressionAttributeNames": {
+                        "#status": "status",
+                        "#role": "role",
+                    },
+                    "ExpressionAttributeValues": {
+                        ":revoked": "REVOKED",
+                        ":active": "ACTIVE",
+                        ":now": now,
+                        ":user_id": str(user_id),
+                        ":role": role,
+                    },
+                }
+            },
+        ]
+    )
 
         return response(200, {"message": "Logged out successfully"})
 
