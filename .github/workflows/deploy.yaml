@@ -15,6 +15,7 @@ on:
   push:
     branches:
       - milestone-2
+      - milestone-3
     paths:
       - 'config.json'
       - 'README.md'
