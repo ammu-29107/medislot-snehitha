@@ -14,6 +14,7 @@ import bcrypt
 import jwt
 import pymysql
 from botocore.exceptions import BotoCoreError, ClientError
+from boto3.dynamodb.types import TypeSerializer
 
 
 logger = logging.getLogger()
@@ -24,6 +25,15 @@ AWS_REGION = os.environ.get("AWS_REGION", "ap-south-1")
 ssm = boto3.client("ssm", region_name=AWS_REGION)
 dynamodb = boto3.resource("dynamodb", region_name=AWS_REGION)
 client = dynamodb.meta.client
+
+serializer = TypeSerializer()
+
+
+def serialize_item(item):
+    return {
+        key: serializer.serialize(value)
+        for key, value in item.items()
+    }
 
 JWT_SECRET_PARAMETER = os.environ["JWT_SECRET_PARAMETER"]
 DB_PASSWORD_PARAMETER = os.environ["DB_PASSWORD_PARAMETER"]
@@ -212,78 +222,53 @@ def handle_login(event, body, correlation_id):
             type(session_id).__name__,
         )
 
-        access_item = {
-            "jti": {"S": access_jti},
-            "userId": {"S": str(user_id)},
-            "role": {"S": role},
-            "expiryTimestamp": {"N": str(access_expiry)},
-            "createdAt": {"N": str(now)},
-            "revoked": {"BOOL": False},
-            "session_id": {"S": session_id},
-        }
-
         transaction_items = [
             {
                 "Put": {
                     "TableName": ACCESS_TOKENS_TABLE,
-                    "Item": {
-                        "jti": {"S": access_jti},
-                        "userId": {"S": str(user_id)},
-                        "role": {"S": role},
-                        "expiryTimestamp": {"N": str(access_expiry)},
-                        "createdAt": {"N": str(now)},
-                        "revoked": {"BOOL": False},
-                        "session_id": {"S": session_id},
-                    },
+                    "Item": serialize_item({
+                        "jti": access_jti,
+                        "userId": str(user_id),
+                        "role": role,
+                        "expiryTimestamp": access_expiry,
+                        "createdAt": now,
+                        "revoked": False,
+                        "session_id": session_id,
+                    }),
                     "ConditionExpression": "attribute_not_exists(jti)",
                 }
             },
             {
                 "Put": {
                     "TableName": REFRESH_TOKENS_TABLE,
-                    "Item": {
-                        "tokenHash": {"S": refresh_token_hash},
-                        "session_id": {"S": session_id},
-                        "userId": {"S": str(user_id)},
-                        "role": {"S": role},
-                        "status": {"S": "ACTIVE"},
-                        "expiryTimestamp": {"N": str(session_expiry)},
-                        "createdAt": {"N": str(now)},
-                    },
-                    "ConditionExpression": (
-                        "attribute_not_exists(tokenHash)"
-                    ),
+                    "Item": serialize_item({
+                        "tokenHash": refresh_token_hash,
+                        "session_id": session_id,
+                        "userId": str(user_id),
+                        "role": role,
+                        "status": "ACTIVE",
+                        "expiryTimestamp": session_expiry,
+                        "createdAt": now,
+                    }),
+                    "ConditionExpression": "attribute_not_exists(tokenHash)",
                 }
             },
             {
                 "Put": {
                     "TableName": SESSIONS_TABLE,
-                    "Item": {
-                        "session_id": {"S": session_id},
-                        "userId": {"S": str(user_id)},
-                        "role": {"S": role},
-                        "status": {"S": "ACTIVE"},
-                        "expiryTimestamp": {"N": str(session_expiry)},
-                        "createdAt": {"N": str(now)},
-                    },
-                    "ConditionExpression": (
-                        "attribute_not_exists(session_id)"
-                   ),
+                    "Item": serialize_item({
+                        "session_id": session_id,
+                        "userId": str(user_id),
+                        "role": role,
+                        "status": "ACTIVE",
+                        "expiryTimestamp": session_expiry,
+                        "createdAt": now,
+                    }),
+                    "ConditionExpression": "attribute_not_exists(session_id)",
                 }
             },
         ]
 
-        first_item = transaction_items[0]["Put"]["Item"]
-
-        logger.info(
-            "DynamoDB request diagnostic: client_type=%s, "
-            "jti_attribute_type=%s, jti_value_type=%s",
-            type(client).__name__,
-            type(first_item["jti"]).__name__,
-            type(first_item["jti"].get("S")).__name__
-        )
-
-        # Create all three records atomically.
         client.transact_write_items(
             TransactItems=transaction_items
         )
