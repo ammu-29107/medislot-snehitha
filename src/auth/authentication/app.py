@@ -234,7 +234,15 @@ def handle_login(event, body, correlation_id):
                 {
                     "Put": {
                         "TableName": ACCESS_TOKENS_TABLE,
-                        "Item": access_item,
+                        "Item": {
+                            "jti": {"S": access_jti},
+                            "userId": {"S": str(user_id)},
+                            "role": {"S": role},
+                            "expiryTimestamp": {"N": str(access_expiry)},
+                            "createdAt": {"N": str(now)},
+                            "revoked": {"BOOL": False},
+                            "session_id": {"S": session_id},
+                        },
                         "ConditionExpression": "attribute_not_exists(jti)",
                     }
                 },
