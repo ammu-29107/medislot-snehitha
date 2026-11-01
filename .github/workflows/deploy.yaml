@@ -48,7 +48,7 @@ jobs:
 
   deploy-network:
     name: Deploy network stack
-    if: github.ref == 'refs/heads/feature/*' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    if: startsWith(github.ref, 'refs/heads/feature/') && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     needs: validate
     runs-on: ubuntu-latest
 
@@ -95,7 +95,7 @@ jobs:
 
   deploy-data:
     name: Deploy database and data resources
-    if: github.ref == 'refs/heads/feature/*' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    if: startsWith(github.ref, 'refs/heads/feature/') && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     needs: deploy-network
     runs-on: ubuntu-latest
 
@@ -434,7 +434,7 @@ jobs:
 
   deploy-auth:
     name: Package and deploy authentication API
-    if: github.ref == 'refs/heads/feature/*' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    if: startsWith(github.ref, 'refs/heads/feature/') && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     needs: deploy-data
     runs-on: ubuntu-latest
 
