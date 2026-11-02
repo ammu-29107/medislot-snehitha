@@ -5,6 +5,8 @@ import os
 import re
 import uuid
 
+from datetime import date
+
 import bcrypt
 import pymysql
 
@@ -142,44 +144,148 @@ def handler(event, context):
             )
 
         # Validate role-specific fields before opening a database connection.
-        specialization = None
         license_number = None
+        hospital_id = None
+        speciality_ids = None
+        qualifications = None
+        experience_years = None
+
         date_of_birth = None
         phone_number = None
+        gender = None
 
         if role == "DOCTOR":
-            specialization = body.get("specialization")
             license_number = body.get("licenseNumber")
+            hospital_id = body.get("hospitalId")
+            speciality_ids = body.get("specialityIds")
+            qualifications = body.get("qualifications")
+            experience_years = body.get("experienceYears")
 
-            if not isinstance(specialization, str) or not specialization.strip():
-                return response(400, {"message": "specialization is required"})
-
-            if not isinstance(license_number, str) or not license_number.strip():
+            if (
+                not isinstance(license_number, str)
+                or not license_number.strip()
+            ):
                 return response(400, {"message": "licenseNumber is required"})
 
-            specialization = specialization.strip()
             license_number = license_number.strip()
 
-            if len(specialization) > 150 or len(license_number) > 100:
-                return response(400, {"message": "Invalid doctor profile fields"})
+            if len(license_number) > 100:
+                return response(400, {"message": "Invalid licenseNumber"})
+
+            if (
+                isinstance(hospital_id, bool)
+                or not isinstance(hospital_id, int)
+                or hospital_id <= 0
+            ):
+                return response(400, {"message": "Valid hospitalId is required"})
+
+            if (
+                not isinstance(speciality_ids, list)
+                or not speciality_ids
+                or any(
+                    isinstance(value, bool)
+                    or not isinstance(value, int)
+                    or value <= 0
+                    for value in speciality_ids
+                )
+                or len(speciality_ids) != len(set(speciality_ids))
+            ):
+                return response(
+                    400,
+                    {
+                        "message": (
+                            "specialityIds must be a non-empty array "
+                            "of unique positive integers"
+                        )
+                    },
+                )
+
+            if qualifications is not None:
+                if (
+                    not isinstance(qualifications, str)
+                    or len(qualifications.strip()) > 500
+                ):
+                    return response(400, {"message": "Invalid qualifications"})
+
+                qualifications = qualifications.strip() or None
+
+            if experience_years is not None:
+                if (
+                    isinstance(experience_years, bool)
+                    or not isinstance(experience_years, int)
+                    or not 0 <= experience_years <= 80
+                ):
+                    return response(
+                        400,
+                        {"message": "experienceYears must be an integer from 0 to 80"},
+                    )
 
         else:
             date_of_birth = body.get("dateOfBirth")
             phone_number = body.get("phoneNumber")
+            gender = body.get("gender")
 
-            if date_of_birth is not None:
-                if not isinstance(date_of_birth, str) or not re.fullmatch(
-                    r"\d{4}-\d{2}-\d{2}", date_of_birth
-                ):
+            # All three patient-specific fields are mandatory.
+            if not all(
+                isinstance(value, str) and value.strip()
+                for value in (date_of_birth, phone_number, gender)
+            ):
+                return response(
+                    400,
+                    {
+                        "message": (
+                            "dateOfBirth, phoneNumber, and gender are required"
+                        )
+                    },
+                )
+
+            # Enforce exact YYYY-MM-DD format.
+            if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date_of_birth.strip()):
+                return response(
+                    400,
+                    {"message": "dateOfBirth must use YYYY-MM-DD format"},
+                )
+
+            # Validate date of birth.
+            try:
+                date_of_birth = date.fromisoformat(date_of_birth.strip())
+
+                if date_of_birth >= date.today():
                     return response(
                         400,
-                        {"message": "dateOfBirth must use YYYY-MM-DD format"},
+                        {"message": "dateOfBirth must be in the past"},
                     )
 
-            if phone_number is not None:
-                if not isinstance(phone_number, str) or len(phone_number) > 20:
-                    return response(400, {"message": "Invalid phoneNumber"})
+            except ValueError:
+                return response(
+                    400,
+                    {"message": "dateOfBirth must use YYYY-MM-DD format"},
+                )
 
+            # Validate phone number.
+            phone_number = phone_number.strip()
+
+            if not re.fullmatch(r"\+?[0-9]{10,15}", phone_number):
+                return response(
+                    400,
+                    {"message": "Invalid phoneNumber"},
+                )
+
+            # Validate gender.
+            gender = gender.strip().upper()
+
+            allowed_genders = {
+                "MALE",
+                "FEMALE",
+                "NON_BINARY",
+                "PREFER_NOT_TO_SAY",
+            }
+
+            if gender not in allowed_genders:
+                return response(
+                    400,
+                    {"message": "Invalid gender"},
+                )
 
         # Hash before storing; plaintext passwords are never persisted.
         password_hash = bcrypt.hashpw(
@@ -190,31 +296,111 @@ def handler(event, context):
         connection = get_db_connection()
 
         with connection.cursor() as cursor:
+
+            # Validate hospital and speciality references for doctors.
             if role == "DOCTOR":
+
+                cursor.execute(
+                    """
+                    SELECT hospital_id
+                    FROM hospitals
+                    WHERE hospital_id = %s
+                      AND status = 'ACTIVE'
+                    """,
+                    (hospital_id,),
+                )
+
+                if not cursor.fetchone():
+                    connection.rollback()
+                    return response(
+                        400,
+                        {"message": "Hospital does not exist or is inactive"},
+                    )
+
+                placeholders = ", ".join(["%s"] * len(speciality_ids))
+
+                cursor.execute(
+                    f"""
+                    SELECT speciality_id
+                    FROM specialities
+                    WHERE speciality_id IN ({placeholders})
+                      AND status = 'ACTIVE'
+                    """,
+                    tuple(speciality_ids),
+                )
+
+                active_speciality_ids = {
+                    row[0] for row in cursor.fetchall()
+                }
+
+                if active_speciality_ids != set(speciality_ids):
+                    connection.rollback()
+                    return response(
+                        400,
+                        {
+                            "message": (
+                                "One or more specialities do not exist "
+                                "or are inactive"
+                            )
+                        },
+                    )
+
+            if role == "DOCTOR":
+
                 cursor.execute(
                     """
                     INSERT INTO doctors (
-                        full_name, email, password_hash,
-                        specialization, license_number
+                        full_name,
+                        email,
+                        password_hash,
+                        license_number,
+                        hospital_id,
+                        qualifications,
+                        experience_years
                     )
-                    VALUES (%s, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
                     """,
                     (
                         full_name,
                         email,
                         password_hash,
-                        specialization,
                         license_number,
+                        hospital_id,
+                        qualifications,
+                        experience_years,
                     ),
                 )
+
+                user_id = cursor.lastrowid
+
+                # Associate the doctor with all selected specialities.
+                cursor.executemany(
+                    """
+                    INSERT INTO doctor_specialities (
+                        doctor_id,
+                        speciality_id
+                    )
+                    VALUES (%s, %s)
+                    """,
+                    [
+                        (user_id, speciality_id)
+                        for speciality_id in speciality_ids
+                    ],
+                )
+
             else:
+
                 cursor.execute(
                     """
                     INSERT INTO patients (
-                        full_name, email, password_hash,
-                        date_of_birth, phone_number
+                        full_name,
+                        email,
+                        password_hash,
+                        date_of_birth,
+                        phone_number,
+                        gender
                     )
-                    VALUES (%s, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s)
                     """,
                     (
                         full_name,
@@ -222,10 +408,11 @@ def handler(event, context):
                         password_hash,
                         date_of_birth,
                         phone_number,
+                        gender,
                     ),
                 )
 
-            user_id = cursor.lastrowid
+                user_id = cursor.lastrowid
 
         connection.commit()
 
