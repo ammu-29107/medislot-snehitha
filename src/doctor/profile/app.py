@@ -121,12 +121,12 @@ def get_profile(connection, doctor_id):
 
         cursor.execute(
             """
-            SELECT s.speciality_id, s.name
+            SELECT s.speciality_id, s.speciality_name
             FROM doctor_specialities ds
             JOIN specialities s
               ON s.speciality_id = ds.speciality_id
             WHERE ds.doctor_id = %s
-            ORDER BY s.name
+            ORDER BY s.speciality_name
             """,
             (doctor_id,),
         )
