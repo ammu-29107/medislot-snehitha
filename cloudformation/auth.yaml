@@ -19,6 +19,10 @@ Parameters:
     Type: String
     Default: medislot-dev-790574019399-artifacts
 
+  PrivateFilesBucketName:
+    Type: String
+    Description: Name of the existing private files S3 bucket
+
   RegisterCodeKey:
     Type: String
     Description: S3 key for the packaged registration Lambda ZIP
@@ -110,6 +114,38 @@ Resources:
                   - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${RefreshTokensTableName}'
                   - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AccessTokensTableName}'
                   - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${SessionsTableName}'
+
+  ProfileLambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole'
+      Policies:
+        - PolicyName: ProfileRuntimeAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ReadDatabasePassword
+                Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/medislot/${Environment}/database/password'
+
+              - Sid: ManageDoctorProfilePhotos
+                Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:s3:::${PrivateFilesBucketName}/doctor-profiles/*'
 
   RegisterFunction:
     Type: AWS::Lambda::Function
@@ -208,7 +244,7 @@ Resources:
       FunctionName: !Sub '${ProjectName}-${Environment}-auth-profile'
       Runtime: python3.12
       Handler: app.handler
-      Role: !GetAtt AuthLambdaExecutionRole.Arn
+      Role: !GetAtt ProfileLambdaExecutionRole.Arn
       Timeout: 15
       MemorySize: 256
       Code:
@@ -232,6 +268,7 @@ Resources:
           DB_USER: !Ref DatabaseUsername
           DB_PASSWORD_PARAMETER: !Sub '/medislot/${Environment}/database/password'
           LOG_LEVEL: INFO
+          PRIVATE_FILES_BUCKET: !Ref PrivateFilesBucketName
 
   AuthHttpApi:
     Type: AWS::ApiGatewayV2::Api
@@ -398,6 +435,18 @@ Outputs:
   AuthApiEndpoint:
     Description: Base URL for the authentication HTTP API
     Value: !GetAtt AuthHttpApi.ApiEndpoint
+
+  AuthApiId:
+    Description: API Gateway HTTP API ID for application feature stacks
+    Value: !Ref AuthHttpApi
+    Export:
+      Name: !Sub '${ProjectName}-${Environment}-AuthApiId'
+
+  AuthAuthorizerId:
+    Description: Custom authorizer ID for application feature stacks
+    Value: !Ref AuthRequestAuthorizer
+    Export:
+      Name: !Sub '${ProjectName}-${Environment}-AuthAuthorizerId'
 
   RegisterFunctionName:
     Value: !Ref RegisterFunction

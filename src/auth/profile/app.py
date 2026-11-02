@@ -44,8 +44,9 @@ def handler(event, context):
         table = "doctors"
         id_column = "doctor_id"
         profile_columns = (
-            "doctor_id, full_name, email, specialization, "
-            "license_number, status"
+            "doctor_id, full_name, email, license_number, "
+            "hospital_id, qualifications, experience_years, "
+            "bio, profile_photo_key, status"
         )
     else:
         table = "patients"
@@ -83,6 +84,19 @@ def handler(event, context):
                     (user_id,),
                 )
                 profile = cursor.fetchone()
+                if profile and role == "DOCTOR":
+                    cursor.execute(
+                        """
+                        SELECT s.speciality_id, s.speciality_name
+                        FROM doctor_specialities ds
+                        JOIN specialities s
+                            ON s.speciality_id = ds.speciality_id
+                        WHERE ds.doctor_id = %s
+                        ORDER BY s.speciality_name
+                        """,
+                        (user_id,),
+                    )
+                    profile["specialities"] = cursor.fetchall()
         finally:
             connection.close()
 
