@@ -176,11 +176,52 @@ CREATE TABLE IF NOT EXISTS blackout_dates (
         ON DELETE RESTRICT
 ) ENGINE=InnoDB;
 
--- 8. SLOTS
+-- 8. DOCTOR AVAILABILITY PATTERNS
+CREATE TABLE IF NOT EXISTS doctor_availability_patterns (
+    pattern_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    doctor_id BIGINT UNSIGNED NOT NULL,
+    consultation_type_id BIGINT UNSIGNED NOT NULL,
+    day_of_week TINYINT UNSIGNED NOT NULL,
+    start_time TIME NOT NULL,
+    end_time TIME NOT NULL,
+    status ENUM('ACTIVE', 'INACTIVE') NOT NULL DEFAULT 'ACTIVE',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        ON UPDATE CURRENT_TIMESTAMP,
+
+    PRIMARY KEY (pattern_id),
+    KEY idx_availability_doctor_day (
+        doctor_id, day_of_week, status
+    ),
+    KEY idx_availability_consultation_type (
+        consultation_type_id
+    ),
+
+    CONSTRAINT chk_availability_day
+        CHECK (day_of_week BETWEEN 0 AND 6),
+
+    CONSTRAINT chk_availability_time
+        CHECK (end_time > start_time),
+
+    CONSTRAINT fk_availability_doctor
+        FOREIGN KEY (doctor_id)
+        REFERENCES doctors (doctor_id)
+        ON UPDATE CASCADE
+        ON DELETE RESTRICT,
+
+    CONSTRAINT fk_availability_consultation
+        FOREIGN KEY (doctor_id, consultation_type_id)
+        REFERENCES consultation_types (doctor_id, consultation_type_id)
+        ON UPDATE CASCADE
+        ON DELETE RESTRICT
+) ENGINE=InnoDB;
+
+-- 9. SLOTS
 CREATE TABLE IF NOT EXISTS slots (
     slot_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     doctor_id BIGINT UNSIGNED NOT NULL,
     consultation_type_id BIGINT UNSIGNED NOT NULL,
+    pattern_id BIGINT UNSIGNED NULL,
     start_at DATETIME NOT NULL,
     end_at DATETIME NOT NULL,
     capacity SMALLINT UNSIGNED NOT NULL DEFAULT 1,
@@ -199,6 +240,7 @@ CREATE TABLE IF NOT EXISTS slots (
     UNIQUE KEY uq_slots_doctor_time (doctor_id, start_at, end_at),
     KEY idx_slots_doctor_start_status (doctor_id, start_at, status),
     KEY idx_slots_consultation_type (consultation_type_id),
+    KEY idx_slots_pattern (pattern_id),
 
     CONSTRAINT chk_slots_time
         CHECK (end_at > start_at),
@@ -219,10 +261,16 @@ CREATE TABLE IF NOT EXISTS slots (
         FOREIGN KEY (doctor_id, consultation_type_id)
         REFERENCES consultation_types (doctor_id, consultation_type_id)
         ON UPDATE CASCADE
+        ON DELETE RESTRICT,
+
+    CONSTRAINT fk_slots_availability_pattern
+        FOREIGN KEY (pattern_id)
+        REFERENCES doctor_availability_patterns (pattern_id)
+        ON UPDATE CASCADE
         ON DELETE RESTRICT
 ) ENGINE=InnoDB;
 
--- 9. APPOINTMENTS
+-- 10. APPOINTMENTS
 CREATE TABLE IF NOT EXISTS appointments (
     appointment_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     booking_reference VARCHAR(40) NOT NULL,
@@ -261,7 +309,7 @@ CREATE TABLE IF NOT EXISTS appointments (
         ON DELETE RESTRICT
 ) ENGINE=InnoDB;
 
--- 10. APPOINTMENT STATUS HISTORY
+-- 11. APPOINTMENT STATUS HISTORY
 CREATE TABLE IF NOT EXISTS appointment_status_history (
     history_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     appointment_id BIGINT UNSIGNED NOT NULL,
@@ -282,7 +330,7 @@ CREATE TABLE IF NOT EXISTS appointment_status_history (
         ON DELETE RESTRICT
 ) ENGINE=InnoDB;
 
--- 11. APPOINTMENT RESCHEDULE HISTORY
+-- 12. APPOINTMENT RESCHEDULE HISTORY
 CREATE TABLE IF NOT EXISTS appointment_reschedule_history (
     reschedule_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     appointment_id BIGINT UNSIGNED NOT NULL,
@@ -322,7 +370,7 @@ CREATE TABLE IF NOT EXISTS appointment_reschedule_history (
         ON DELETE RESTRICT
 ) ENGINE=InnoDB;
 
--- 12. WAITLIST ENTRIES
+-- 13. WAITLIST ENTRIES
 CREATE TABLE IF NOT EXISTS waitlist_entries (
     waitlist_entry_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     slot_id BIGINT UNSIGNED NOT NULL,
@@ -355,7 +403,7 @@ CREATE TABLE IF NOT EXISTS waitlist_entries (
         ON DELETE RESTRICT
 ) ENGINE=InnoDB;
 
--- 13. WAITLIST OFFERS
+-- 14. WAITLIST OFFERS
 CREATE TABLE IF NOT EXISTS waitlist_offers (
     offer_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     waitlist_entry_id BIGINT UNSIGNED NOT NULL,
@@ -384,7 +432,7 @@ CREATE TABLE IF NOT EXISTS waitlist_offers (
         ON DELETE RESTRICT
 ) ENGINE=InnoDB;
 
--- 14. REFUND LEDGER
+-- 15. REFUND LEDGER
 CREATE TABLE IF NOT EXISTS refund_ledger (
     refund_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     appointment_id BIGINT UNSIGNED NOT NULL,
@@ -407,7 +455,7 @@ CREATE TABLE IF NOT EXISTS refund_ledger (
         ON DELETE RESTRICT
 ) ENGINE=InnoDB;
 
--- 15. OUTBOX EVENTS
+-- 16. OUTBOX EVENTS
 CREATE TABLE IF NOT EXISTS outbox_events (
     event_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     event_uuid CHAR(36) NOT NULL,

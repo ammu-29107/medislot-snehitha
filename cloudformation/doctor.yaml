@@ -28,6 +28,8 @@ Parameters:
     Type: String
   SlotMaintenanceCodeKey:
     Type: String
+  AvailabilityCodeKey:
+    Type: String
 
 Resources:
 
@@ -117,6 +119,27 @@ Resources:
         - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole'
       Policies:
         - PolicyName: DayViewDatabaseAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: ssm:GetParameter
+                Resource: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${ProjectName}/${Environment}/database/password'
+
+  AvailabilityExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole'
+      Policies:
+        - PolicyName: AvailabilityDatabaseAccess
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
@@ -240,6 +263,36 @@ Resources:
           DB_PASSWORD_PARAMETER: !Sub '/${ProjectName}/${Environment}/database/password'
           LOG_LEVEL: INFO
 
+  AvailabilityFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${ProjectName}-${Environment}-availability'
+      Runtime: python3.12
+      Handler: app.handler
+      Role: !GetAtt AvailabilityExecutionRole.Arn
+      Timeout: 20
+      MemorySize: 256
+      Code:
+        S3Bucket: !Ref ArtifactsBucketName
+        S3Key: !Ref AvailabilityCodeKey
+      VpcConfig:
+        SecurityGroupIds:
+          - Fn::ImportValue:
+              Fn::Sub: '${NetworkStackName}-LambdaSecurityGroupId'
+        SubnetIds:
+          - Fn::ImportValue:
+              Fn::Sub: '${NetworkStackName}-PrivateSubnetAId'
+          - Fn::ImportValue:
+              Fn::Sub: '${NetworkStackName}-PrivateSubnetBId'
+      Environment:
+        Variables:
+          DB_HOST: !Ref DatabaseHost
+          DB_PORT: '3306'
+          DB_NAME: medislot
+          DB_USER: !Ref DatabaseUsername
+          DB_PASSWORD_PARAMETER: !Sub '/${ProjectName}/${Environment}/database/password'
+          LOG_LEVEL: INFO
+
   DayViewFunction:
     Type: AWS::Lambda::Function
     Properties:
@@ -338,6 +391,17 @@ Resources:
       IntegrationType: AWS_PROXY
       IntegrationMethod: POST
       IntegrationUri: !GetAtt SchedulingFunction.Arn
+      PayloadFormatVersion: '2.0'
+
+  AvailabilityIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId:
+        Fn::ImportValue:
+          Fn::Sub: '${ProjectName}-${Environment}-AuthApiId'
+      IntegrationType: AWS_PROXY
+      IntegrationMethod: POST
+      IntegrationUri: !GetAtt AvailabilityFunction.Arn
       PayloadFormatVersion: '2.0'
 
   DayViewIntegration:
@@ -485,6 +549,58 @@ Resources:
           Fn::Sub: '${ProjectName}-${Environment}-AuthAuthorizerId'
       Target: !Sub 'integrations/${SchedulingIntegration}'
 
+  AvailabilityPatternsGetRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId:
+        Fn::ImportValue:
+          Fn::Sub: '${ProjectName}-${Environment}-AuthApiId'
+      RouteKey: 'GET /doctor/availability-patterns'
+      AuthorizationType: CUSTOM
+      AuthorizerId:
+        Fn::ImportValue:
+          Fn::Sub: '${ProjectName}-${Environment}-AuthAuthorizerId'
+      Target: !Sub 'integrations/${AvailabilityIntegration}'
+
+  AvailabilityPatternsPostRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId:
+        Fn::ImportValue:
+          Fn::Sub: '${ProjectName}-${Environment}-AuthApiId'
+      RouteKey: 'POST /doctor/availability-patterns'
+      AuthorizationType: CUSTOM
+      AuthorizerId:
+        Fn::ImportValue:
+          Fn::Sub: '${ProjectName}-${Environment}-AuthAuthorizerId'
+      Target: !Sub 'integrations/${AvailabilityIntegration}'
+
+  AvailabilityPatternsPutRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId:
+        Fn::ImportValue:
+          Fn::Sub: '${ProjectName}-${Environment}-AuthApiId'
+      RouteKey: 'PUT /doctor/availability-patterns/{patternId}'
+      AuthorizationType: CUSTOM
+      AuthorizerId:
+        Fn::ImportValue:
+          Fn::Sub: '${ProjectName}-${Environment}-AuthAuthorizerId'
+      Target: !Sub 'integrations/${AvailabilityIntegration}'
+
+  AvailabilityPatternsDeleteRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId:
+        Fn::ImportValue:
+          Fn::Sub: '${ProjectName}-${Environment}-AuthApiId'
+      RouteKey: 'DELETE /doctor/availability-patterns/{patternId}'
+      AuthorizationType: CUSTOM
+      AuthorizerId:
+        Fn::ImportValue:
+          Fn::Sub: '${ProjectName}-${Environment}-AuthAuthorizerId'
+      Target: !Sub 'integrations/${AvailabilityIntegration}'
+
   DoctorDayViewGetRoute:
     Type: AWS::ApiGatewayV2::Route
     Properties:
@@ -540,6 +656,18 @@ Resources:
           - ApiId:
               Fn::ImportValue:
                 Fn::Sub: '${ProjectName}-${Environment}-AuthApiId'
+
+  AvailabilityApiPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref AvailabilityFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub
+        - 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiId}/*/*/doctor/availability-patterns*'
+        - ApiId:
+            Fn::ImportValue:
+              Fn::Sub: '${ProjectName}-${Environment}-AuthApiId'
 
   DayViewApiPermission:
     Type: AWS::Lambda::Permission

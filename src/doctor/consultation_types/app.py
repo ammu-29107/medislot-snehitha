@@ -155,6 +155,30 @@ def create_type(connection, doctor_id, data):
     with connection.cursor() as cursor:
         cursor.execute(
             """
+            SELECT doctor_id
+            FROM doctors
+            WHERE doctor_id = %s
+              AND status = 'ACTIVE'
+            FOR UPDATE
+            """,
+            (doctor_id,),
+        )
+
+        if not cursor.fetchone():
+            raise LookupError("Active doctor profile not found")
+
+        cursor.execute(
+            """
+            SELECT COUNT(*) AS type_count
+            FROM consultation_types
+            WHERE doctor_id = %s
+            """,
+            (doctor_id,),
+        )
+        is_first_type = cursor.fetchone()["type_count"] == 0
+
+        cursor.execute(
+            """
             INSERT INTO consultation_types (
                 doctor_id,
                 type_name,
@@ -175,7 +199,37 @@ def create_type(connection, doctor_id, data):
             ),
         )
 
-        return cursor.lastrowid
+        consultation_type_id = cursor.lastrowid
+
+        if is_first_type:
+            default_patterns = [
+                (0, "09:00", "17:00"),
+                (1, "09:00", "17:00"),
+                (2, "09:00", "17:00"),
+                (3, "09:00", "17:00"),
+                (4, "09:00", "17:00"),
+                (5, "09:00", "13:00"),
+            ]
+
+            cursor.executemany(
+                """
+                INSERT INTO doctor_availability_patterns (
+                    doctor_id,
+                    consultation_type_id,
+                    day_of_week,
+                    start_time,
+                    end_time,
+                    status
+                )
+                VALUES (%s, %s, %s, %s, %s, 'ACTIVE')
+                """,
+                [
+                    (doctor_id, consultation_type_id, day, start, end)
+                    for day, start, end in default_patterns
+                ],
+            )
+
+        return consultation_type_id
 
 
 def update_type(connection, doctor_id, type_id, data):
