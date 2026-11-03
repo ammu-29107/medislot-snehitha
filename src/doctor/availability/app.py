@@ -186,8 +186,8 @@ def list_patterns(cursor, doctor_id, query):
             pattern_id,
             consultation_type_id,
             day_of_week,
-            TIME_FORMAT(start_time, '%H:%i') AS start_time,
-            TIME_FORMAT(end_time, '%H:%i') AS end_time,
+            TIME_FORMAT(start_time, '%%H:%%i') AS start_time,
+            TIME_FORMAT(end_time, '%%H:%%i') AS end_time,
             status,
             created_at,
             updated_at
@@ -271,8 +271,8 @@ def update_pattern(cursor, doctor_id, pattern_id, data):
         SELECT
             consultation_type_id,
             day_of_week,
-            start_time,
-            end_time,
+            TIME_FORMAT(start_time, '%%H:%%i') AS start_time,
+            TIME_FORMAT(end_time, '%%H:%%i') AS end_time,
             status
         FROM doctor_availability_patterns
         WHERE pattern_id = %s
