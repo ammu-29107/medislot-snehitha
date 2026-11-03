@@ -1,0 +1,211 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard | MediSlot{% endblock %}
+
+{% block body %}
+
+<div class="app-layout">
+
+    <aside class="sidebar" id="sidebar">
+
+        <div class="sidebar-brand">
+            <div class="brand-icon">M</div>
+            <span>MediSlot</span>
+        </div>
+
+        <div class="sidebar-label">WORKSPACE</div>
+
+        <nav class="sidebar-nav">
+            <a href="/dashboard" class="nav-link active">
+                <span class="nav-icon">▦</span>
+                Dashboard
+            </a>
+
+            <a href="{{ url_for('profile') }}" class="nav-link">
+                <span class="nav-icon">♙</span>
+                My Profile
+            </a>
+
+            <a href="{{ url_for('consultation_types') }}" class="nav-link">
+                <span class="nav-icon">▤</span>
+                Consultation Types
+            </a>
+
+            <a href="#" class="nav-link">
+                <span class="nav-icon">◷</span>
+                Availability
+            </a>
+
+            <a href="#" class="nav-link">
+                <span class="nav-icon">▦</span>
+                Schedule & Slots
+            </a>
+
+            <a href="#" class="nav-link">
+                <span class="nav-icon">▧</span>
+                Blackout Dates
+            </a>
+        </nav>
+
+        <div class="sidebar-bottom">
+            <a href="/logout" class="nav-link">
+                <span class="nav-icon">↪</span>
+                Logout
+            </a>
+        </div>
+
+    </aside>
+
+    <main class="main-content">
+
+        <header class="topbar">
+            <button class="menu-toggle" id="menuToggle">☰</button>
+
+            <div>
+                <span class="topbar-label">DOCTOR PORTAL</span>
+                <h2>Overview</h2>
+            </div>
+
+            <div class="topbar-profile">
+                <div class="avatar">DR</div>
+                <div>
+                    <strong>Doctor</strong>
+                    <small>Medical Professional</small>
+                </div>
+            </div>
+        </header>
+
+        <section class="page-content">
+
+            <div class="welcome-section">
+                <div>
+                    <p class="eyebrow">YOUR PRACTICE AT A GLANCE</p>
+                    <h1>Welcome back, Doctor</h1>
+                    <p class="muted">
+                        Here's an overview of your appointments and schedule.
+                    </p>
+                </div>
+
+                <div class="today-date" id="todayDate"></div>
+            </div>
+
+            <div class="stats-grid">
+
+                <div class="stat-card">
+                    <div class="stat-top">
+                        <span class="stat-label">Today's Slots</span>
+                        <span class="stat-icon teal">◷</span>
+                    </div>
+                    <h2>--</h2>
+                    <p>Available and scheduled slots</p>
+                </div>
+
+                <div class="stat-card">
+                    <div class="stat-top">
+                        <span class="stat-label">Upcoming Appointments</span>
+                        <span class="stat-icon blue">▦</span>
+                    </div>
+                    <h2>--</h2>
+                    <p>Appointments ahead</p>
+                </div>
+
+                <div class="stat-card">
+                    <div class="stat-top">
+                        <span class="stat-label">Consultation Types</span>
+                        <span class="stat-icon purple">▤</span>
+                    </div>
+                    <h2>--</h2>
+                    <p>Active consultation types</p>
+                </div>
+
+                <div class="stat-card">
+                    <div class="stat-top">
+                        <span class="stat-label">Availability</span>
+                        <span class="stat-icon orange">◷</span>
+                    </div>
+                    <h2>--</h2>
+                    <p>Weekly schedule status</p>
+                </div>
+
+            </div>
+
+            <div class="content-grid">
+
+                <section class="panel schedule-panel">
+
+                    <div class="panel-heading">
+                        <div>
+                            <h3>Upcoming Schedule</h3>
+                            <p class="muted">Your next scheduled slots</p>
+                        </div>
+
+                        <a href="#" class="text-link">View schedule →</a>
+                    </div>
+
+                    <div class="empty-state">
+                        <div class="empty-icon">▦</div>
+                        <h4>Your schedule will appear here</h4>
+                        <p>
+                            Once your slots and appointments are loaded,
+                            you'll be able to view them here.
+                        </p>
+                    </div>
+
+                </section>
+
+                <section class="panel quick-panel">
+
+                    <div class="panel-heading">
+                        <div>
+                            <h3>Quick Actions</h3>
+                            <p class="muted">Manage your practice</p>
+                        </div>
+                    </div>
+
+                    <a href="{{ url_for('profile') }}" class="action-link">
+                        <span class="action-icon teal">♙</span>
+                        <span>
+                            <strong>Update Profile</strong>
+                            <small>Manage your doctor information</small>
+                        </span>
+                        <span class="action-arrow">→</span>
+                    </a>
+
+                    <a href="#" class="action-link">
+                        <span class="action-icon blue">◷</span>
+                        <span>
+                            <strong>Set Availability</strong>
+                            <small>Manage your weekly hours</small>
+                        </span>
+                        <span class="action-arrow">→</span>
+                    </a>
+
+                    <a href="{{ url_for('consultation_types') }}" class="action-link">
+                        <span class="action-icon purple">▤</span>
+                        <span>
+                            <strong>Consultation Types</strong>
+                            <small>Manage services and fees</small>
+                        </span>
+                        <span class="action-arrow">→</span>
+                    </a>
+
+                    <a href="#" class="action-link">
+                        <span class="action-icon orange">▧</span>
+                        <span>
+                            <strong>Add Blackout Date</strong>
+                            <small>Mark unavailable periods</small>
+                        </span>
+                        <span class="action-arrow">→</span>
+                    </a>
+
+                </section>
+
+            </div>
+
+        </section>
+
+    </main>
+
+</div>
+
+{% endblock %}

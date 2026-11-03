@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% block title %}Consultation Types | MediSlot{% endblock %}
+
+{% block body %}
+<div class="app-layout">
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-brand">
+            <div class="brand-icon">M</div>
+            <span>MediSlot</span>
+        </div>
+        <div class="sidebar-label">WORKSPACE</div>
+        <nav class="sidebar-nav">
+            <a href="{{ url_for('dashboard') }}" class="nav-link">Dashboard</a>
+            <a href="{{ url_for('profile') }}" class="nav-link">My Profile</a>
+            <a href="{{ url_for('consultation_types') }}" class="nav-link active">Consultation Types</a>
+            <a href="#" class="nav-link">Availability</a>
+            <a href="#" class="nav-link">Schedule & Slots</a>
+            <a href="#" class="nav-link">Blackout Dates</a>
+        </nav>
+        <div class="sidebar-bottom">
+            <a href="{{ url_for('logout') }}" class="nav-link">Logout</a>
+        </div>
+    </aside>
+
+    <main class="main-content">
+        <header class="topbar">
+            <button class="menu-toggle" id="menuToggle">☰</button>
+            <div>
+                <span class="topbar-label">DOCTOR PORTAL</span>
+                <h2>Consultation Types</h2>
+            </div>
+        </header>
+
+        <section class="page-content">
+            <div class="welcome-section">
+                <div>
+                    <p class="eyebrow">YOUR SERVICES</p>
+                    <h1>Consultation Types</h1>
+                    <p class="muted">Manage your consultation services, duration and fees.</p>
+                </div>
+            </div>
+
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% for category, message in messages %}
+                    <p class="flash-message {{ category }}">{{ message }}</p>
+                {% endfor %}
+            {% endwith %}
+
+            <section class="panel">
+                <div class="panel-heading">
+                    <h3>Add Consultation Type</h3>
+                </div>
+
+                <form method="POST">
+                    <div class="form-group">
+                        <label>Consultation name</label>
+                        <input name="type_name" required maxlength="100">
+                    </div>
+
+                    <div class="form-group">
+                        <label>Description</label>
+                        <textarea name="description" rows="3" maxlength="500"></textarea>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Duration (minutes)</label>
+                        <input type="number" name="duration_minutes" min="1" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Capacity</label>
+                        <input type="number" name="capacity" min="1" max="10" value="1" required>
+                        <small>Only Health Camp Session supports capacity above 1.</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Consultation fee</label>
+                        <input type="number" name="consultation_fee" min="0" step="0.01" value="0" required>
+                    </div>
+
+                    <button type="submit" class="login-button">Add Consultation Type</button>
+                </form>
+            </section>
+
+            <section class="panel">
+                <div class="panel-heading">
+                    <h3>Your Consultation Types</h3>
+                </div>
+
+                {% for item in consultation_types %}
+                    <div class="action-link">
+                        <div style="width:100%">
+                            <form method="POST"
+                                  action="{{ url_for('update_consultation_type', type_id=item.consultation_type_id) }}">
+                                <div class="form-group">
+                                    <label>Name</label>
+                                    <input name="type_name" value="{{ item.type_name }}" required>
+                                </div>
+
+                                <div class="form-group">
+                                    <label>Description</label>
+                                    <textarea name="description" rows="2">{{ item.description or '' }}</textarea>
+                                </div>
+
+                                <div class="form-group">
+                                    <label>Duration (minutes)</label>
+                                    <input type="number" name="duration_minutes"
+                                           value="{{ item.duration_minutes }}" min="1" required>
+                                </div>
+
+                                <div class="form-group">
+                                    <label>Capacity</label>
+                                    <input type="number" name="capacity"
+                                           value="{{ item.capacity }}" min="1" max="10" required>
+                                </div>
+
+                                <div class="form-group">
+                                    <label>Fee</label>
+                                    <input type="number" name="consultation_fee"
+                                           value="{{ item.consultation_fee }}" min="0" step="0.01" required>
+                                </div>
+
+                                <p>Status: {{ item.status }}</p>
+                                <button type="submit" class="login-button">Save Changes</button>
+                            </form>
+
+                            {% if item.status == "ACTIVE" %}
+                                <form method="POST"
+                                      action="{{ url_for('disable_consultation_type', type_id=item.consultation_type_id) }}">
+                                    <button type="submit">Disable</button>
+                                </form>
+                            {% endif %}
+                        </div>
+                    </div>
+                {% else %}
+                    <div class="empty-state">
+                        <h4>No consultation types yet</h4>
+                        <p>Add your first consultation type above.</p>
+                    </div>
+                {% endfor %}
+            </section>
+        </section>
+    </main>
+</div>
+{% endblock %}

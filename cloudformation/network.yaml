@@ -187,6 +187,11 @@ Resources:
           FromPort: 22
           ToPort: 22
           CidrIp: 0.0.0.0/0
+        - Description: HTTP access to MediSlot dashboard
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
       Tags:
         - Key: Name
           Value: !Sub '${ProjectName}-${Environment}-dashboard-sg'
@@ -201,6 +206,19 @@ Resources:
       VpcEndpointType: Interface
       VpcId: !Ref MediSlotVPC
       ServiceName: !Sub 'com.amazonaws.${AWS::Region}.ssm'
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - !Ref PrivateSubnetA
+        - !Ref PrivateSubnetB
+      SecurityGroupIds:
+        - !Ref VpcEndpointSecurityGroup
+
+  SsmMessagesVpcEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcEndpointType: Interface
+      VpcId: !Ref MediSlotVPC
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.ssmmessages'
       PrivateDnsEnabled: true
       SubnetIds:
         - !Ref PrivateSubnetA

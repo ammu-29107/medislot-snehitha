@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}My Profile | MediSlot{% endblock %}
+
+{% block body %}
+<div class="app-layout">
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-brand">
+            <div class="brand-icon">M</div>
+            <span>MediSlot</span>
+        </div>
+        <div class="sidebar-label">WORKSPACE</div>
+        <nav class="sidebar-nav">
+            <a href="{{ url_for('dashboard') }}" class="nav-link">Dashboard</a>
+            <a href="{{ url_for('profile') }}" class="nav-link active">My Profile</a>
+            <a href="{{ url_for('consultation_types') }}" class="nav-link">Consultation Types</a>
+            <a href="#" class="nav-link">Availability</a>
+            <a href="#" class="nav-link">Schedule & Slots</a>
+            <a href="#" class="nav-link">Blackout Dates</a>
+        </nav>
+        <div class="sidebar-bottom">
+            <a href="{{ url_for('logout') }}" class="nav-link">Logout</a>
+        </div>
+    </aside>
+
+    <main class="main-content">
+        <header class="topbar">
+            <button class="menu-toggle" id="menuToggle">☰</button>
+            <div>
+                <span class="topbar-label">DOCTOR PORTAL</span>
+                <h2>My Profile</h2>
+            </div>
+        </header>
+
+        <section class="page-content">
+            <div class="welcome-section">
+                <div>
+                    <p class="eyebrow">PERSONAL INFORMATION</p>
+                    <h1>Manage your profile</h1>
+                    <p class="muted">Keep your professional details up to date.</p>
+                </div>
+            </div>
+
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% for category, message in messages %}
+                    <p class="flash-message {{ category }}">{{ message }}</p>
+                {% endfor %}
+            {% endwith %}
+
+            <section class="panel">
+                <form method="POST">
+                    <div class="form-group">
+                        <label>Full name</label>
+                        <input name="full_name" value="{{ profile.full_name or '' }}" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Email address</label>
+                        <input value="{{ profile.email or '' }}" disabled>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Medical license number</label>
+                        <input value="{{ profile.license_number or '' }}" disabled>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Hospital ID</label>
+                        <input name="hospital_id" value="{{ profile.hospital_id or '' }}">
+                    </div>
+
+                    <div class="form-group">
+                        <label>Qualifications</label>
+                        <input name="qualifications" value="{{ profile.qualifications or '' }}">
+                    </div>
+
+                    <div class="form-group">
+                        <label>Years of experience</label>
+                        <input type="number" min="0" name="experience_years"
+                               value="{{ profile.experience_years or 0 }}">
+                    </div>
+
+                    <div class="form-group">
+                        <label>Speciality IDs (comma-separated)</label>
+                        <input name="speciality_ids"
+                               value="{{ profile.specialities | map(attribute='speciality_id') | join(', ') }}">
+                    </div>
+
+                    <div class="form-group">
+                        <label>Professional bio</label>
+                        <textarea name="bio" rows="5">{{ profile.bio or '' }}</textarea>
+                    </div>
+
+                    <button type="submit" class="login-button">Save Changes</button>
+                </form>
+            </section>
+        </section>
+    </main>
+</div>
+{% endblock %}
