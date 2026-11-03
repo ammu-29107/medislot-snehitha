@@ -788,6 +788,7 @@ jobs:
           package_function day-view src/doctor/day_view
           package_function slot-maintenance src/doctor/slot_maintenance
           package_function availability src/doctor/availability
+          package_function slot-materialiser src/doctor/slot_materialiser
 
       - name: Upload doctor Lambda packages to S3
         id: packages
@@ -813,6 +814,7 @@ jobs:
           upload_package day_view "$RUNNER_TEMP/doctor-day-view.zip"
           upload_package slot_maintenance "$RUNNER_TEMP/doctor-slot-maintenance.zip"
           upload_package availability "$RUNNER_TEMP/doctor-availability.zip"
+          upload_package slot_materialiser "$RUNNER_TEMP/doctor-slot-materialiser.zip"
 
       - name: Deploy doctor stack
         shell: bash
@@ -831,6 +833,7 @@ jobs:
           DAY_VIEW_KEY: ${{ steps.packages.outputs.day_view_key }}
           SLOT_MAINTENANCE_KEY: ${{ steps.packages.outputs.slot_maintenance_key }}
           AVAILABILITY_KEY: ${{ steps.packages.outputs.availability_key }}
+          SLOT_MATERIALISER_KEY: ${{ steps.packages.outputs.slot_materialiser_key }}
         run: |
           set -euo pipefail
 
@@ -851,6 +854,7 @@ jobs:
               DayViewCodeKey="$DAY_VIEW_KEY" \
               SlotMaintenanceCodeKey="$SLOT_MAINTENANCE_KEY" \
               AvailabilityCodeKey="$AVAILABILITY_KEY" \
+              SlotMaterialiserCodeKey="$SLOT_MATERIALISER_KEY" \
             --region "$REGION" \
             --capabilities CAPABILITY_NAMED_IAM \
             --no-fail-on-empty-changeset

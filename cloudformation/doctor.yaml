@@ -30,6 +30,8 @@ Parameters:
     Type: String
   AvailabilityCodeKey:
     Type: String
+  SlotMaterialiserCodeKey:
+    Type: String
 
 Resources:
 
@@ -161,6 +163,27 @@ Resources:
         - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole'
       Policies:
         - PolicyName: SlotMaintenanceDatabaseAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: ssm:GetParameter
+                Resource: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${ProjectName}/${Environment}/database/password'
+
+  SlotMaterialiserExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole'
+      Policies:
+        - PolicyName: SlotMaterialiserDatabaseAccess
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
@@ -335,6 +358,36 @@ Resources:
       Code:
         S3Bucket: !Ref ArtifactsBucketName
         S3Key: !Ref SlotMaintenanceCodeKey
+      VpcConfig:
+        SecurityGroupIds:
+          - Fn::ImportValue:
+              Fn::Sub: '${NetworkStackName}-LambdaSecurityGroupId'
+        SubnetIds:
+          - Fn::ImportValue:
+              Fn::Sub: '${NetworkStackName}-PrivateSubnetAId'
+          - Fn::ImportValue:
+              Fn::Sub: '${NetworkStackName}-PrivateSubnetBId'
+      Environment:
+        Variables:
+          DB_HOST: !Ref DatabaseHost
+          DB_PORT: '3306'
+          DB_NAME: medislot
+          DB_USER: !Ref DatabaseUsername
+          DB_PASSWORD_PARAMETER: !Sub '/${ProjectName}/${Environment}/database/password'
+          LOG_LEVEL: INFO
+
+  SlotMaterialiserFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${ProjectName}-${Environment}-slot-materialiser'
+      Runtime: python3.12
+      Handler: app.handler
+      Role: !GetAtt SlotMaterialiserExecutionRole.Arn
+      Timeout: 300
+      MemorySize: 512
+      Code:
+        S3Bucket: !Ref ArtifactsBucketName
+        S3Key: !Ref SlotMaterialiserCodeKey
       VpcConfig:
         SecurityGroupIds:
           - Fn::ImportValue:
@@ -717,6 +770,40 @@ Resources:
       Target:
         Arn: !GetAtt SlotMaintenanceFunction.Arn
         RoleArn: !GetAtt SlotMaintenanceScheduleRole.Arn
+        Input: '{}'
+
+  SlotMaterialiserScheduleRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: scheduler.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: InvokeSlotMaterialiser
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt SlotMaterialiserFunction.Arn
+
+  SlotMaterialiserSchedule:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Name: !Sub '${ProjectName}-${Environment}-slot-materialiser'
+      Description: Generates doctor appointment slots for the rolling 30-day window
+      State: ENABLED
+      ScheduleExpression: cron(5 0 * * ? *)
+      ScheduleExpressionTimezone: Asia/Kolkata
+      FlexibleTimeWindow:
+        Mode: 'OFF'
+      Target:
+        Arn: !GetAtt SlotMaterialiserFunction.Arn
+        RoleArn: !GetAtt SlotMaterialiserScheduleRole.Arn
         Input: '{}'
 
 Outputs:
