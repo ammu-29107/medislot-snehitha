@@ -498,6 +498,19 @@ Resources:
           Fn::Sub: '${ProjectName}-${Environment}-AuthAuthorizerId'
       Target: !Sub 'integrations/${DoctorProfileIntegration}'
 
+  DoctorProfilePhotoUploadRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId:
+        Fn::ImportValue:
+          Fn::Sub: '${ProjectName}-${Environment}-AuthApiId'
+      RouteKey: 'POST /doctor/profile/photo-upload-url'
+      AuthorizationType: CUSTOM
+      AuthorizerId:
+        Fn::ImportValue:
+          Fn::Sub: '${ProjectName}-${Environment}-AuthAuthorizerId'
+      Target: !Sub 'integrations/${DoctorProfileIntegration}'
+
   ConsultationTypesGetRoute:
     Type: AWS::ApiGatewayV2::Route
     Properties:
@@ -679,7 +692,7 @@ Resources:
       Principal: apigateway.amazonaws.com
       SourceArn:
         Fn::Sub:
-          - 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiId}/*/*/doctor/profile'
+          - 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiId}/*/*/doctor/profile*'
           - ApiId:
               Fn::ImportValue:
                 Fn::Sub: '${ProjectName}-${Environment}-AuthApiId'

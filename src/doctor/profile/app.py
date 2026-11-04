@@ -27,6 +27,7 @@ ALLOWED_PROFILE_FIELDS = {
     "experience_years",
     "bio",
     "hospital_id",
+    "profile_photo_key",
 }
 
 ALLOWED_PHOTO_TYPES = {

@@ -1,0 +1,193 @@
+
+AWSTemplateFormatVersion: '2010-09-09'
+Description: MediSlot doctor dashboard EC2 instance
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: medislot
+
+  Environment:
+    Type: String
+    Default: dev
+
+  ArtifactsBucketName:
+    Type: String
+    Description: S3 bucket containing the dashboard application package
+
+  DashboardCodeKey:
+    Type: String
+    Description: S3 key for the dashboard application ZIP
+
+  FlaskSecretParameter:
+    Type: String
+    Default: /medislot/dev/dashboard/flask-secret-key
+
+  InstanceType:
+    Type: String
+    Default: t3.micro
+
+  KeyPairName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: Existing EC2 key pair in the deployment region for SSH access
+
+  ApiBaseUrl:
+    Type: String
+    Description: MediSlot API Gateway HTTP API base URL
+
+Resources:
+  DashboardInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectName}-${Environment}-dashboard-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: DashboardRuntimeAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource: !Sub 'arn:${AWS::Partition}:s3:::${ArtifactsBucketName}/${DashboardCodeKey}'
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                Resource: !Sub
+                  - 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ParameterPath}'
+                  - ParameterPath: !Ref FlaskSecretParameter
+
+  DashboardInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref DashboardInstanceRole
+
+  DashboardInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: '{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64}}'
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref DashboardInstanceProfile
+      KeyName: !Ref KeyPairName
+      MetadataOptions:
+        HttpEndpoint: enabled
+        HttpTokens: required
+        HttpPutResponseHopLimit: 1
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: true
+          DeviceIndex: '0'
+          SubnetId:
+            Fn::ImportValue:
+              !Sub '${ProjectName}-${Environment}-PublicSubnetId'
+          GroupSet:
+            - Fn::ImportValue:
+                !Sub '${ProjectName}-${Environment}-DashboardSecurityGroupId'
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: 12
+            VolumeType: gp3
+            Encrypted: true
+            DeleteOnTermination: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-dashboard'
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+      UserData:
+        Fn::Base64: !Sub |
+            #!/bin/bash
+            set -euo pipefail
+            exec > >(tee /var/log/medislot-dashboard-setup.log | logger -t medislot-dashboard -s 2>/dev/console) 2>&1
+
+            dnf update -y
+            dnf install -y python3.12 python3.12-pip nginx unzip
+
+            mkdir -p /opt/medislot/dashboard/flask_session
+
+            aws s3 cp \
+              "s3://${ArtifactsBucketName}/${DashboardCodeKey}" \
+              /tmp/dashboard.zip \
+              --region '${AWS::Region}'
+            unzip -oq /tmp/dashboard.zip -d /opt/medislot/dashboard
+
+            python3.12 -m venv /opt/medislot/venv
+            /opt/medislot/venv/bin/pip install --upgrade pip
+            /opt/medislot/venv/bin/pip install -r /opt/medislot/dashboard/requirements.txt
+
+            FLASK_SECRET=$(/usr/bin/aws ssm get-parameter \
+              --name '${FlaskSecretParameter}' \
+              --with-decryption \
+              --query 'Parameter.Value' \
+              --output text \
+              --region '${AWS::Region}')
+
+            cat > /etc/medislot-dashboard.env <<ENV
+            FLASK_SECRET_KEY=$FLASK_SECRET
+            MEDISLOT_API_BASE_URL=${ApiBaseUrl}
+            ENV
+
+            chmod 600 /etc/medislot-dashboard.env
+
+            chown -R ec2-user:ec2-user /opt/medislot
+
+            cat > /etc/systemd/system/medislot-dashboard.service <<'SERVICE'
+            [Unit]
+            Description=MediSlot Flask Dashboard
+            Wants=network-online.target
+            After=network-online.target
+
+            [Service]
+            User=ec2-user
+            Group=ec2-user
+            WorkingDirectory=/opt/medislot/dashboard
+            EnvironmentFile=/etc/medislot-dashboard.env
+            ExecStart=/opt/medislot/venv/bin/gunicorn --workers 2 --bind 127.0.0.1:8000 app:app
+            Restart=always
+
+            [Install]
+            WantedBy=multi-user.target
+            SERVICE
+
+            cat > /etc/nginx/conf.d/medislot.conf <<'NGINX'
+            server {
+                listen 80;
+                server_name _;
+
+                location / {
+                    proxy_pass http://127.0.0.1:8000;
+                    proxy_set_header Host $host;
+                    proxy_set_header X-Real-IP $remote_addr;
+                    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                    proxy_set_header X-Forwarded-Proto $scheme;
+                }
+            }
+            NGINX
+
+            systemctl daemon-reload
+            systemctl enable --now medislot-dashboard
+            systemctl enable --now nginx
+
+Outputs:
+  DashboardInstanceId:
+    Description: Dashboard EC2 instance ID
+    Value: !Ref DashboardInstance
+
+  DashboardPublicIp:
+    Description: Public IPv4 address of the dashboard
+    Value: !GetAtt DashboardInstance.PublicIp
+
+  DashboardUrl:
+    Description: Dashboard URL
+    Value: !Sub 'http://${DashboardInstance.PublicDnsName}'

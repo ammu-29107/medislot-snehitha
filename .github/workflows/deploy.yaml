@@ -13,6 +13,7 @@ on:
       - 'src/database/**'
       - 'src/auth/**'
       - 'src/doctor/**'
+      - 'dashboard/**'
   push:
     branches:
       - feature/*
@@ -25,6 +26,7 @@ on:
       - 'src/database/**'
       - 'src/auth/**'
       - 'src/doctor/**'
+      - 'dashboard/**'
   workflow_dispatch:
 
 permissions:
@@ -45,7 +47,7 @@ jobs:
       - name: Validate CloudFormation templates
         run: |
           pip install cfn-lint
-          cfn-lint cloudformation/network.yaml cloudformation/data.yaml cloudformation/auth.yaml cloudformation/doctor.yaml --ignore-checks W1011 W3037
+          cfn-lint cloudformation/network.yaml cloudformation/data.yaml cloudformation/auth.yaml cloudformation/doctor.yaml cloudformation/dashboard.yaml
 
 
   deploy-network:
@@ -612,7 +614,6 @@ jobs:
           echo "database_host=$(get_output DatabaseEndpoint)" >> "$GITHUB_OUTPUT"
           echo "database_username=$(get_output DatabaseUsername)" >> "$GITHUB_OUTPUT"
           echo "refresh_tokens_table=$(get_output RefreshTokensTableName)" >> "$GITHUB_OUTPUT"
-          echo "access_tokens_table=$(get_output AccessTokensTableName)" >> "$GITHUB_OUTPUT"
           echo "sessions_table=$(get_output SessionsTableName)" >> "$GITHUB_OUTPUT"
           echo "artifacts_bucket=$(get_output DeploymentArtifactsBucketName)" >> "$GITHUB_OUTPUT"
           echo "private_files_bucket=$(get_output PrivateFilesBucketName)" >> "$GITHUB_OUTPUT"
@@ -658,7 +659,6 @@ jobs:
           DATABASE_HOST: ${{ steps.data.outputs.database_host }}
           DATABASE_USERNAME: ${{ steps.data.outputs.database_username }}
           REFRESH_TOKENS_TABLE: ${{ steps.data.outputs.refresh_tokens_table }}
-          ACCESS_TOKENS_TABLE: ${{ steps.data.outputs.access_tokens_table }}
           SESSIONS_TABLE: ${{ steps.data.outputs.sessions_table }}
         run: |
           set -euo pipefail
@@ -679,7 +679,6 @@ jobs:
               RefreshTokensTableName="$REFRESH_TOKENS_TABLE" \
               DatabaseUsername="$DATABASE_USERNAME" \
               DatabaseHost="$DATABASE_HOST" \
-              AccessTokensTableName="$ACCESS_TOKENS_TABLE" \
               SessionsTableName="$SESSIONS_TABLE" \
             --region "$REGION" \
             --capabilities CAPABILITY_NAMED_IAM \
@@ -855,6 +854,162 @@ jobs:
               SlotMaintenanceCodeKey="$SLOT_MAINTENANCE_KEY" \
               AvailabilityCodeKey="$AVAILABILITY_KEY" \
               SlotMaterialiserCodeKey="$SLOT_MATERIALISER_KEY" \
+            --region "$REGION" \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --no-fail-on-empty-changeset
+
+  deploy-dashboard:
+    name: Package and deploy doctor dashboard
+    if: startsWith(github.ref, 'refs/heads/feature/') && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    needs: deploy-doctor
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Read deployment configuration
+        id: config
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "region=$(jq -r '.AWSRegion' config.json)" >> "$GITHUB_OUTPUT"
+          echo "environment=$(jq -r '.Environment' config.json)" >> "$GITHUB_OUTPUT"
+          echo "stack_prefix=$(jq -r '.StackPrefix' config.json)" >> "$GITHUB_OUTPUT"
+          echo "project_name=$(jq -r '.ProjectName' config.json)" >> "$GITHUB_OUTPUT"
+          echo "key_pair_name=$(jq -r '.EC2KeyPairName' config.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Configure AWS credentials using OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ steps.config.outputs.region }}
+
+      - name: Read deployment artifacts bucket
+        id: data
+        shell: bash
+        env:
+          STACK_PREFIX: ${{ steps.config.outputs.stack_prefix }}
+          REGION: ${{ steps.config.outputs.region }}
+        run: |
+          set -euo pipefail
+
+          BUCKET="$(aws cloudformation describe-stacks \
+            --stack-name "${STACK_PREFIX}-data" \
+            --region "$REGION" \
+            --query "Stacks[0].Outputs[?OutputKey=='DeploymentArtifactsBucketName'].OutputValue | [0]" \
+            --output text)"
+
+          if [[ -z "$BUCKET" || "$BUCKET" == "None" ]]; then
+            echo "Deployment artifacts bucket output is missing."
+            exit 1
+          fi
+
+          echo "artifacts_bucket=$BUCKET" >> "$GITHUB_OUTPUT"
+
+      - name: Read API Gateway endpoint
+        id: api
+        shell: bash
+        env:
+          STACK_PREFIX: ${{ steps.config.outputs.stack_prefix }}
+          REGION: ${{ steps.config.outputs.region }}
+        run: |
+          set -euo pipefail
+
+          API_BASE_URL="$(aws cloudformation describe-stacks \
+            --stack-name "${STACK_PREFIX}-auth" \
+            --region "$REGION" \
+            --query "Stacks[0].Outputs[?OutputKey=='AuthApiEndpoint'].OutputValue | [0]" \
+            --output text)"
+
+          if [[ -z "$API_BASE_URL" || "$API_BASE_URL" == "None" ]]; then
+            echo "Auth API endpoint output is missing."
+            exit 1
+          fi
+
+          echo "api_base_url=$API_BASE_URL" >> "$GITHUB_OUTPUT"
+
+      - name: Provision dashboard Flask secret in SSM
+        shell: bash
+        env:
+          FLASK_SECRET_KEY: ${{ secrets.FLASK_SECRET_KEY }}
+          PROJECT_NAME: ${{ steps.config.outputs.project_name }}
+          ENVIRONMENT: ${{ steps.config.outputs.environment }}
+          REGION: ${{ steps.config.outputs.region }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "$FLASK_SECRET_KEY" ]]; then
+            echo "FLASK_SECRET_KEY GitHub secret is missing."
+            exit 1
+          fi
+
+          aws ssm put-parameter \
+            --name "/${PROJECT_NAME}/${ENVIRONMENT}/dashboard/flask-secret-key" \
+            --type SecureString \
+            --value "$FLASK_SECRET_KEY" \
+            --overwrite \
+            --region "$REGION"
+
+          echo "Dashboard Flask secret provisioned in SSM."
+
+      - name: Package dashboard application
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cd dashboard
+          zip -qr "$RUNNER_TEMP/dashboard.zip" .
+
+      - name: Upload dashboard package to S3
+        id: package
+        shell: bash
+        env:
+          ARTIFACTS_BUCKET: ${{ steps.data.outputs.artifacts_bucket }}
+        run: |
+          set -euo pipefail
+
+          DASHBOARD_KEY="dashboard/dashboard-${GITHUB_SHA}.zip"
+
+          aws s3 cp "$RUNNER_TEMP/dashboard.zip" \
+            "s3://${ARTIFACTS_BUCKET}/${DASHBOARD_KEY}"
+
+          echo "dashboard_code_key=$DASHBOARD_KEY" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy dashboard stack
+        shell: bash
+        env:
+          REGION: ${{ steps.config.outputs.region }}
+          STACK_PREFIX: ${{ steps.config.outputs.stack_prefix }}
+          PROJECT_NAME: ${{ steps.config.outputs.project_name }}
+          ENVIRONMENT: ${{ steps.config.outputs.environment }}
+          KEY_PAIR_NAME: ${{ steps.config.outputs.key_pair_name }}
+          ARTIFACTS_BUCKET: ${{ steps.data.outputs.artifacts_bucket }}
+          DASHBOARD_CODE_KEY: ${{ steps.package.outputs.dashboard_code_key }}
+          API_BASE_URL: ${{ steps.api.outputs.api_base_url }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "$KEY_PAIR_NAME" || "$KEY_PAIR_NAME" == "null" ]]; then
+            echo "EC2KeyPairName is missing from config.json."
+            exit 1
+          fi
+
+          aws cloudformation deploy \
+            --template-file cloudformation/dashboard.yaml \
+            --stack-name "${STACK_PREFIX}-dashboard" \
+            --parameter-overrides \
+              ProjectName="$PROJECT_NAME" \
+              Environment="$ENVIRONMENT" \
+              ArtifactsBucketName="$ARTIFACTS_BUCKET" \
+              DashboardCodeKey="$DASHBOARD_CODE_KEY" \
+              FlaskSecretParameter="/${PROJECT_NAME}/${ENVIRONMENT}/dashboard/flask-secret-key" \
+              KeyPairName="$KEY_PAIR_NAME" \
+              ApiBaseUrl="$API_BASE_URL" \
             --region "$REGION" \
             --capabilities CAPABILITY_NAMED_IAM \
             --no-fail-on-empty-changeset

@@ -47,7 +47,17 @@
             {% endwith %}
 
             <section class="panel">
-                <form method="POST">
+                <form method="POST" enctype="multipart/form-data">
+                    <div class="form-group">
+                        <label for="profile_photo">Profile photo</label>
+                        <input
+                            type="file"
+                            id="profile_photo"
+                            name="profile_photo"
+                            accept="image/jpeg,image/png,image/webp"
+                        >
+                    </div>
+
                     <div class="form-group">
                         <label>Full name</label>
                         <input name="full_name" value="{{ profile.full_name or '' }}" required>

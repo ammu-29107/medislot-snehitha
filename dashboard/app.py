@@ -16,6 +16,7 @@ app = Flask(__name__)
 
 app.config.update(
     SECRET_KEY=os.environ["FLASK_SECRET_KEY"],
+    SESSION_FILE_DIR="/opt/medislot/dashboard/flask_session",
     SESSION_TYPE="filesystem",
     SESSION_PERMANENT=False,
     SESSION_USE_SIGNER=True,
@@ -23,10 +24,7 @@ app.config.update(
 
 Session(app)
 
-API_BASE_URL = os.environ.get(
-    "MEDISLOT_API_BASE_URL",
-    "https://u28pd0o89i.execute-api.us-east-1.amazonaws.com",
-)
+API_BASE_URL = os.environ["MEDISLOT_API_BASE_URL"].rstrip("/")
 
 def call_doctor_api(method, path, **kwargs):
     access_token = session.get("access_token")
@@ -123,7 +121,10 @@ def dashboard():
 
 @app.route("/profile", methods=["GET", "POST"])
 def profile():
-    if not session.get("access_token"):
+    if (
+        not session.get("access_token")
+        or session.get("role") != "DOCTOR"
+    ):
         return redirect(url_for("login"))
 
     if request.method == "POST":
@@ -148,6 +149,52 @@ def profile():
             "speciality_ids": speciality_ids,
         }
 
+        uploaded_file = request.files.get("profile_photo")
+
+        if uploaded_file and uploaded_file.filename:
+            if uploaded_file.mimetype not in {
+                "image/jpeg",
+                "image/png",
+                "image/webp",
+            }:
+                flash("Only JPEG, PNG, and WEBP images are allowed.", "error")
+                return redirect(url_for("profile"))
+
+            photo_bytes = uploaded_file.read()
+
+            if not photo_bytes:
+                flash("The selected photo is empty.", "error")
+                return redirect(url_for("profile"))
+
+            if len(photo_bytes) > 5 * 1024 * 1024:
+                flash("Profile photo must be 5 MB or smaller.", "error")
+                return redirect(url_for("profile"))
+
+            uploaded_file.seek(0)
+
+            upload_info, upload_status = call_doctor_api(
+                "POST",
+                "/doctor/profile/photo-upload-url",
+                json={"content_type": uploaded_file.mimetype},
+            )
+
+            if upload_status != 200 or not upload_info.get("upload_url") or not upload_info.get("photo_key"):
+                flash("Could not generate photo upload URL.", "error")
+                return redirect(url_for("profile"))
+
+            s3_response = requests.put(
+                upload_info["upload_url"],
+                data=photo_bytes,
+                headers={"Content-Type": upload_info["content_type"]},
+                timeout=30,
+            )
+
+            if not s3_response.ok:
+                flash("Photo upload failed.", "error")
+                return redirect(url_for("profile"))
+
+            payload["profile_photo_key"] = upload_info["photo_key"]
+
         data, status = call_doctor_api(
             "PUT", "/doctor/profile", json=payload
         )
@@ -169,7 +216,10 @@ def profile():
 
 @app.route("/consultation-types", methods=["GET", "POST"])
 def consultation_types():
-    if not session.get("access_token"):
+    if (
+        not session.get("access_token")
+        or session.get("role") != "DOCTOR"
+    ):
         return redirect(url_for("login"))
 
     if request.method == "POST":
@@ -209,7 +259,10 @@ def consultation_types():
 
 @app.route("/consultation-types/<int:type_id>/update", methods=["POST"])
 def update_consultation_type(type_id):
-    if not session.get("access_token"):
+    if (
+        not session.get("access_token")
+        or session.get("role") != "DOCTOR"
+    ):
         return redirect(url_for("login"))
 
     payload = {
@@ -236,7 +289,10 @@ def update_consultation_type(type_id):
 
 @app.route("/consultation-types/<int:type_id>/disable", methods=["POST"])
 def disable_consultation_type(type_id):
-    if not session.get("access_token"):
+    if (
+        not session.get("access_token")
+        or session.get("role") != "DOCTOR"
+    ):
         return redirect(url_for("login"))
 
     data, status = call_doctor_api(

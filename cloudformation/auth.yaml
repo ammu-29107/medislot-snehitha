@@ -55,10 +55,6 @@ Parameters:
     Type: String
     Description: Endpoint hostname of the existing RDS database
 
-  AccessTokensTableName:
-    Type: String
-    Description: DynamoDB table for access token records
-
 Resources:
   AuthLambdaExecutionRole:
     Type: AWS::IAM::Role
@@ -112,7 +108,6 @@ Resources:
                   - dynamodb:DeleteItem
                 Resource:
                   - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${RefreshTokensTableName}'
-                  - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AccessTokensTableName}'
                   - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${SessionsTableName}'
 
   ProfileLambdaExecutionRole:
@@ -209,7 +204,6 @@ Resources:
           DB_PASSWORD_PARAMETER: !Sub '/medislot/${Environment}/database/password'
           JWT_SECRET_PARAMETER: !Sub '/medislot/${Environment}/auth/jwt-signing-secret'
           REFRESH_TOKENS_TABLE: !Ref RefreshTokensTableName
-          ACCESS_TOKENS_TABLE: !Ref AccessTokensTableName
           SESSIONS_TABLE: !Ref SessionsTableName
           JWT_ISSUER: medislot
           JWT_AUDIENCE: medislot-api
@@ -232,7 +226,6 @@ Resources:
       Environment:
         Variables:
           JWT_SECRET_PARAMETER: !Sub '/medislot/${Environment}/auth/jwt-signing-secret'
-          ACCESS_TOKENS_TABLE: !Ref AccessTokensTableName
           JWT_ISSUER: medislot
           JWT_AUDIENCE: medislot-api
           LOG_LEVEL: INFO
