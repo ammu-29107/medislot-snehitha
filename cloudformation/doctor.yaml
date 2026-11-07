@@ -829,8 +829,14 @@ Outputs:
   SchedulingFunctionName:
     Value: !Ref SchedulingFunction
 
+  AvailabilityFunctionName:
+    Value: !Ref AvailabilityFunction
+
   DayViewFunctionName:
     Value: !Ref DayViewFunction
+
+  SlotMaterialiserFunctionName:
+    Value: !Ref SlotMaterialiserFunction
 
   SlotMaintenanceFunctionName:
     Value: !Ref SlotMaintenanceFunction

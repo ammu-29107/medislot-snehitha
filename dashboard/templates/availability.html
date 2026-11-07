@@ -1,0 +1,172 @@
+{% extends "base.html" %}
+{% block title %}Availability | MediSlot{% endblock %}
+{% set active_page = 'availability' %}
+
+{% block body %}
+<div class="app-layout">
+    {% include "_sidebar.html" %}
+
+    <main class="main-content">
+        <header class="topbar">
+            <button class="menu-toggle" id="menuToggle" type="button" aria-label="Toggle navigation">☰</button>
+            <div>
+                <span class="topbar-label">DOCTOR PORTAL</span>
+                <h2>Availability</h2>
+            </div>
+        </header>
+
+        <section class="page-content">
+            <div class="welcome-section">
+                <div>
+                    <p class="eyebrow">PLAN YOUR WEEK</p>
+                    <h1>Weekly availability</h1>
+                    <p class="muted">Set recurring days and time windows for each active consultation type. MediSlot uses these patterns to generate bookable slots.</p>
+                </div>
+                <a class="btn btn-secondary" href="{{ url_for('schedule') }}">View schedule <span aria-hidden="true">→</span></a>
+            </div>
+
+            {% include "_flash_messages.html" %}
+
+            <section class="panel">
+                <div class="panel-heading">
+                    <div>
+                        <h3>Add a weekly pattern</h3>
+                        <p class="muted">Times use India Standard Time (IST).</p>
+                    </div>
+                </div>
+
+                {% if not consultation_types_loaded %}
+                    <div class="empty-state compact-empty">
+                        <h4>Consultation types could not be loaded</h4>
+                        <p>Refresh the page or check the consultation-types API response.</p>
+                    </div>
+                {% elif consultation_types %}
+                    <form method="POST" action="{{ url_for('availability') }}" class="form-grid">
+                        <div class="form-group">
+                            <label for="consultation_type_id">Consultation type</label>
+                            <select id="consultation_type_id" name="consultation_type_id" required>
+                                <option value="">Choose a consultation type</option>
+                                {% for item in consultation_types %}
+                                    <option value="{{ item.consultation_type_id }}">{{ item.type_name }} · {{ item.duration_minutes }} min</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="day_of_week">Day of week</label>
+                            <select id="day_of_week" name="day_of_week" required>
+                                <option value="">Choose a day</option>
+                                {% for day, day_name in [(0, 'Monday'), (1, 'Tuesday'), (2, 'Wednesday'), (3, 'Thursday'), (4, 'Friday'), (5, 'Saturday'), (6, 'Sunday')] %}
+                                    <option value="{{ day }}">{{ day_name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="start_time">Start time</label>
+                            <input id="start_time" type="time" name="start_time" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="end_time">End time</label>
+                            <input id="end_time" type="time" name="end_time" required>
+                        </div>
+                        <div class="form-actions form-actions-wide">
+                            <button type="submit" class="btn btn-primary">Add availability pattern</button>
+                        </div>
+                    </form>
+                {% else %}
+                    <div class="empty-state compact-empty">
+                        <h4>No active consultation types</h4>
+                        <p>Create an active consultation type before setting weekly availability.</p>
+                        <a class="text-link" href="{{ url_for('consultation_types') }}">Manage consultation types →</a>
+                    </div>
+                {% endif %}
+            </section>
+
+            <section class="panel">
+                <div class="panel-heading">
+                    <div>
+                        <h3>Your recurring patterns</h3>
+                        <p class="muted">Edit a pattern or deactivate it when you no longer offer that time.</p>
+                    </div>
+                    <span class="count-chip">{{ availability_patterns|length }} pattern{{ '' if availability_patterns|length == 1 else 's' }}</span>
+                </div>
+
+                {% if not availability_patterns_loaded %}
+                    <div class="empty-state compact-empty">
+                        <h4>Availability patterns could not be loaded</h4>
+                        <p>The API request failed. Check the dashboard logs and API Gateway access logs.</p>
+                    </div>
+                {% elif availability_patterns %}
+                    <div class="pattern-list">
+                        {% for item in availability_patterns %}
+                            <article class="pattern-card">
+                                <div class="pattern-card-heading">
+                                    <div>
+                                        <span class="eyebrow">PATTERN #{{ item.pattern_id }}</span>
+                                        <h4>{{ item.consultation_type_name }}</h4>
+                                        <p class="muted">{{ ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'][item.day_of_week|int] }} · {{ item.start_time }}–{{ item.end_time }}</p>
+                                    </div>
+                                    <span class="status-badge {{ 'status-active' if item.status == 'ACTIVE' else 'status-inactive' }}">{{ item.status|title }}</span>
+                                </div>
+
+                                {% if item.consultation_type_active %}
+                                    <form method="POST" action="{{ url_for('update_availability', pattern_id=item.pattern_id) }}" class="form-grid pattern-edit-form">
+                                        <div class="form-group">
+                                            <label>Consultation type</label>
+                                            <select name="consultation_type_id" required>
+                                                {% for consultation in consultation_types %}
+                                                    <option value="{{ consultation.consultation_type_id }}" {% if consultation.consultation_type_id == item.consultation_type_id %}selected{% endif %}>{{ consultation.type_name }}</option>
+                                                {% endfor %}
+                                            </select>
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Day</label>
+                                            <select name="day_of_week" required>
+                                                {% for day, day_name in [(0, 'Monday'), (1, 'Tuesday'), (2, 'Wednesday'), (3, 'Thursday'), (4, 'Friday'), (5, 'Saturday'), (6, 'Sunday')] %}
+                                                    <option value="{{ day }}" {% if day == item.day_of_week|int %}selected{% endif %}>{{ day_name }}</option>
+                                                {% endfor %}
+                                            </select>
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Start</label>
+                                            <input type="time" name="start_time" value="{{ item.start_time }}" required>
+                                        </div>
+                                        <div class="form-group">
+                                            <label>End</label>
+                                            <input type="time" name="end_time" value="{{ item.end_time }}" required>
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Status</label>
+                                            <select name="status" required>
+                                                <option value="ACTIVE" {% if item.status == 'ACTIVE' %}selected{% endif %}>Active</option>
+                                                <option value="INACTIVE" {% if item.status == 'INACTIVE' %}selected{% endif %}>Inactive</option>
+                                            </select>
+                                        </div>
+                                        <div class="form-actions form-actions-wide">
+                                            <button type="submit" class="btn btn-secondary">Save changes</button>
+                                            {% if item.status == 'ACTIVE' %}
+                                                <button type="submit" class="btn btn-danger" formaction="{{ url_for('deactivate_availability', pattern_id=item.pattern_id) }}" formmethod="POST" formnovalidate data-confirm="Deactivate this weekly availability pattern?">Deactivate</button>
+                                            {% endif %}
+                                        </div>
+                                    </form>
+                                {% else %}
+                                    <p class="inline-notice">This pattern belongs to a {{ item.consultation_type_status|lower }} consultation type. It cannot be edited until the consultation type is active again.</p>
+                                    {% if item.status == 'ACTIVE' %}
+                                        <form method="POST" action="{{ url_for('deactivate_availability', pattern_id=item.pattern_id) }}">
+                                            <button type="submit" class="btn btn-danger" data-confirm="Deactivate this weekly availability pattern?">Deactivate pattern</button>
+                                        </form>
+                                    {% endif %}
+                                {% endif %}
+                            </article>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <div class="empty-state compact-empty">
+                        <h4>No availability patterns yet</h4>
+                        <p>Add your first weekly pattern above. Slots will be generated by the scheduled materialiser.</p>
+                    </div>
+                {% endif %}
+            </section>
+        </section>
+    </main>
+</div>
+{% endblock %}

@@ -1,30 +1,13 @@
 {% extends "base.html" %}
 {% block title %}My Profile | MediSlot{% endblock %}
+{% set active_page = 'profile' %}
 
 {% block body %}
 <div class="app-layout">
-    <aside class="sidebar" id="sidebar">
-        <div class="sidebar-brand">
-            <div class="brand-icon">M</div>
-            <span>MediSlot</span>
-        </div>
-        <div class="sidebar-label">WORKSPACE</div>
-        <nav class="sidebar-nav">
-            <a href="{{ url_for('dashboard') }}" class="nav-link">Dashboard</a>
-            <a href="{{ url_for('profile') }}" class="nav-link active">My Profile</a>
-            <a href="{{ url_for('consultation_types') }}" class="nav-link">Consultation Types</a>
-            <a href="#" class="nav-link">Availability</a>
-            <a href="#" class="nav-link">Schedule & Slots</a>
-            <a href="#" class="nav-link">Blackout Dates</a>
-        </nav>
-        <div class="sidebar-bottom">
-            <a href="{{ url_for('logout') }}" class="nav-link">Logout</a>
-        </div>
-    </aside>
-
+    {% include "_sidebar.html" %}
     <main class="main-content">
         <header class="topbar">
-            <button class="menu-toggle" id="menuToggle">☰</button>
+            <button class="menu-toggle" id="menuToggle" type="button" aria-label="Toggle navigation">☰</button>
             <div>
                 <span class="topbar-label">DOCTOR PORTAL</span>
                 <h2>My Profile</h2>
@@ -32,76 +15,58 @@
         </header>
 
         <section class="page-content">
+            {% include "_flash_messages.html" %}
             <div class="welcome-section">
                 <div>
                     <p class="eyebrow">PERSONAL INFORMATION</p>
-                    <h1>Manage your profile</h1>
-                    <p class="muted">Keep your professional details up to date.</p>
+                    <h1>My Professional Profile</h1>
+                    <p class="muted">Review your registered professional and account details.</p>
                 </div>
+                <a href="{{ url_for('edit_profile') }}" class="btn btn-primary">Edit profile</a>
             </div>
 
-            {% with messages = get_flashed_messages(with_categories=true) %}
-                {% for category, message in messages %}
-                    <p class="flash-message {{ category }}">{{ message }}</p>
-                {% endfor %}
-            {% endwith %}
-
-            <section class="panel">
-                <form method="POST" enctype="multipart/form-data">
-                    <div class="form-group">
-                        <label for="profile_photo">Profile photo</label>
-                        <input
-                            type="file"
-                            id="profile_photo"
-                            name="profile_photo"
-                            accept="image/jpeg,image/png,image/webp"
-                        >
+            <section class="panel profile-panel">
+                <div class="profile-header profile-header-expanded">
+                    {% if profile.profile_photo_url %}
+                        <div class="profile-photo-wrap">
+                            <img
+                                src="{{ profile.profile_photo_url }}"
+                                alt="Doctor profile photo"
+                                class="profile-photo image-preview-trigger"
+                                data-image-preview="{{ profile.profile_photo_url }}"
+                                data-image-expiry="{{ profile.profile_photo_url_expires_in or 300 }}"
+                                role="button"
+                                tabindex="0"
+                                aria-label="Open profile photo"
+                            >
+                            <a class="text-link photo-open-link" href="{{ profile.profile_photo_url }}" target="_blank" rel="noopener noreferrer">Open photo ↗</a>
+                        </div>
+                    {% else %}
+                        <div class="avatar profile-photo-fallback">{{ (profile.full_name or 'D')[:1]|upper }}</div>
+                    {% endif %}
+                    <div class="profile-heading-copy">
+                        <h2>{{ profile.full_name or 'Doctor' }}</h2>
+                        <p class="muted">{{ profile.qualifications or 'Qualifications not added' }}</p>
+                        <span class="status-badge {{ 'status-active' if profile.status == 'ACTIVE' else 'status-neutral' }}">{{ profile.status or 'Status unavailable' }}</span>
                     </div>
+                </div>
 
-                    <div class="form-group">
-                        <label>Full name</label>
-                        <input name="full_name" value="{{ profile.full_name or '' }}" required>
+                <div class="profile-details-grid">
+                    <div><span class="detail-label">Email address</span><p>{{ profile.email or 'Not available' }}</p></div>
+                    <div><span class="detail-label">Medical license number</span><p>{{ profile.license_number or 'Not available' }}</p></div>
+                    <div><span class="detail-label">Hospital ID</span><p>{{ profile.hospital_id or 'Not added' }}</p></div>
+                    <div><span class="detail-label">Years of experience</span><p>{{ profile.experience_years if profile.experience_years is not none else 'Not added' }}</p></div>
+                    <div>
+                        <span class="detail-label">Specialities</span>
+                        <p>{% if profile.specialities %}{{ profile.specialities | map(attribute='speciality_name') | join(', ') }}{% else %}Not added{% endif %}</p>
                     </div>
+                    <div><span class="detail-label">Account status</span><p>{{ profile.status or 'Not available' }}</p></div>
+                </div>
 
-                    <div class="form-group">
-                        <label>Email address</label>
-                        <input value="{{ profile.email or '' }}" disabled>
-                    </div>
-
-                    <div class="form-group">
-                        <label>Medical license number</label>
-                        <input value="{{ profile.license_number or '' }}" disabled>
-                    </div>
-
-                    <div class="form-group">
-                        <label>Hospital ID</label>
-                        <input name="hospital_id" value="{{ profile.hospital_id or '' }}">
-                    </div>
-
-                    <div class="form-group">
-                        <label>Qualifications</label>
-                        <input name="qualifications" value="{{ profile.qualifications or '' }}">
-                    </div>
-
-                    <div class="form-group">
-                        <label>Years of experience</label>
-                        <input type="number" min="0" name="experience_years"
-                               value="{{ profile.experience_years or 0 }}">
-                    </div>
-
-                    <div class="form-group">
-                        <label>Speciality IDs (comma-separated)</label>
-                        <input name="speciality_ids"
-                               value="{{ profile.specialities | map(attribute='speciality_id') | join(', ') }}">
-                    </div>
-
-                    <div class="form-group">
-                        <label>Professional bio</label>
-                        <textarea name="bio" rows="5">{{ profile.bio or '' }}</textarea>
-                    </div>
-
-                    <button type="submit" class="login-button">Save Changes</button>
-                </form>
+                <div class="profile-bio">
+                    <h3>Professional bio</h3>
+                    <p>{{ profile.bio or 'No professional bio added yet.' }}</p>
+                </div>
             </section>
         </section>
     </main>

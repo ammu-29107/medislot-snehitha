@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block title %}Blackout Dates | MediSlot{% endblock %}
+{% set active_page = 'blackout_dates' %}
+
+{% block body %}
+<div class="app-layout">
+    {% include "_sidebar.html" %}
+
+    <main class="main-content">
+        <header class="topbar">
+            <button class="menu-toggle" id="menuToggle" type="button" aria-label="Toggle navigation">☰</button>
+            <div>
+                <span class="topbar-label">DOCTOR PORTAL</span>
+                <h2>Blackout Dates</h2>
+            </div>
+        </header>
+
+        <section class="page-content">
+            <div class="welcome-section">
+                <div>
+                    <p class="eyebrow">TIME OFF &amp; UNAVAILABILITY</p>
+                    <h1>Blackout periods</h1>
+                    <p class="muted">Mark periods when you are unavailable. MediSlot prevents new slots from being generated in these windows and blocks eligible unbooked slots already created.</p>
+                </div>
+                <a class="btn btn-secondary" href="{{ url_for('schedule') }}">View schedule →</a>
+            </div>
+
+            {% include "_flash_messages.html" %}
+
+            <section class="panel">
+                <div class="panel-heading">
+                    <div>
+                        <h3>Add a blackout period</h3>
+                        <p class="muted">Enter start and end in India Standard Time (IST).</p>
+                    </div>
+                </div>
+                <form method="POST" action="{{ url_for('blackout_dates') }}" class="form-grid">
+                    <div class="form-group">
+                        <label for="blackout-start">Starts</label>
+                        <input id="blackout-start" type="datetime-local" name="start_at" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="blackout-end">Ends</label>
+                        <input id="blackout-end" type="datetime-local" name="end_at" required>
+                    </div>
+                    <div class="form-group form-group-full">
+                        <label for="blackout-reason">Reason (optional)</label>
+                        <textarea id="blackout-reason" name="reason" rows="3" maxlength="500" placeholder="e.g. Personal leave, conference, clinic closed"></textarea>
+                    </div>
+                    <div class="form-actions form-actions-wide">
+                        <button type="submit" class="btn btn-primary">Save blackout period</button>
+                    </div>
+                </form>
+                <p class="form-help">If a blackout overlaps a slot with confirmed bookings, the API rejects it. Complete the appointment cancellation/leave workflow first.</p>
+            </section>
+
+            <section class="panel">
+                <div class="panel-heading">
+                    <div>
+                        <h3>Saved blackout periods</h3>
+                        <p class="muted">These periods are used by the slot materialiser and scheduling API.</p>
+                    </div>
+                    <span class="count-chip">{{ blackout_dates|length }} period{{ '' if blackout_dates|length == 1 else 's' }}</span>
+                </div>
+
+                {% if not blackouts_loaded %}
+                    <div class="empty-state compact-empty">
+                        <h4>Blackout periods could not be loaded</h4>
+                        <p>Check GET /doctor/blackout-dates and the scheduling Lambda logs.</p>
+                    </div>
+                {% elif blackout_dates %}
+                    <div class="table-wrap">
+                        <table class="data-table">
+                            <thead>
+                                <tr><th>Start</th><th>End</th><th>Reason</th><th>Created</th></tr>
+                            </thead>
+                            <tbody>
+                                {% for item in blackout_dates %}
+                                    <tr>
+                                        <td>{{ item.start_at|ist_datetime }}</td>
+                                        <td>{{ item.end_at|ist_datetime }}</td>
+                                        <td>{{ item.reason or '—' }}</td>
+                                        <td>{{ item.created_at|ist_datetime }}</td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    <p class="form-help">The current scheduling API supports creating and listing blackout periods. It does not yet expose edit or delete operations.</p>
+                {% else %}
+                    <div class="empty-state compact-empty">
+                        <h4>No blackout periods recorded</h4>
+                        <p>Add a period above when you will be unavailable for appointments.</p>
+                    </div>
+                {% endif %}
+            </section>
+        </section>
+    </main>
+</div>
+{% endblock %}

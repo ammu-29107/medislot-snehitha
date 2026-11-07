@@ -363,12 +363,21 @@ Resources:
       AuthorizationType: CUSTOM
       AuthorizerId: !Ref AuthRequestAuthorizer
 
+  AuthApiAccessLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/apigateway/${ProjectName}-${Environment}-http-api'
+      RetentionInDays: 30
+
   AuthApiStage:
     Type: AWS::ApiGatewayV2::Stage
     Properties:
       ApiId: !Ref AuthHttpApi
       StageName: '$default'
       AutoDeploy: true
+      AccessLogSettings:
+        DestinationArn: !GetAtt AuthApiAccessLogGroup.Arn
+        Format: '{"requestId":"$context.requestId","requestTime":"$context.requestTime","routeKey":"$context.routeKey","status":"$context.status","responseLength":"$context.responseLength","integrationError":"$context.integrationErrorMessage"}'
 
   RegisterInvokePermission:
     Type: AWS::Lambda::Permission

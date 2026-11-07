@@ -1013,3 +1013,101 @@ jobs:
             --region "$REGION" \
             --capabilities CAPABILITY_NAMED_IAM \
             --no-fail-on-empty-changeset
+
+      - name: Deploy the new dashboard package to the running EC2 instance
+        shell: bash
+        env:
+          REGION: ${{ steps.config.outputs.region }}
+          STACK_PREFIX: ${{ steps.config.outputs.stack_prefix }}
+          ARTIFACTS_BUCKET: ${{ steps.data.outputs.artifacts_bucket }}
+          DASHBOARD_CODE_KEY: ${{ steps.package.outputs.dashboard_code_key }}
+        run: |
+          set -euo pipefail
+
+          INSTANCE_ID="$(aws cloudformation describe-stacks \
+            --stack-name "${STACK_PREFIX}-dashboard" \
+            --region "$REGION" \
+            --query "Stacks[0].Outputs[?OutputKey=='DashboardInstanceId'].OutputValue | [0]" \
+            --output text)"
+
+          if [[ -z "$INSTANCE_ID" || "$INSTANCE_ID" == "None" ]]; then
+            echo "DashboardInstanceId output is missing."
+            exit 1
+          fi
+
+          echo "Waiting for dashboard EC2 instance $INSTANCE_ID to register with Systems Manager..."
+          ONLINE=false
+          for attempt in $(seq 1 30); do
+            PING_STATUS="$(aws ssm describe-instance-information \
+              --filters "Key=InstanceIds,Values=${INSTANCE_ID}" \
+              --region "$REGION" \
+              --query 'InstanceInformationList[0].PingStatus' \
+              --output text 2>/dev/null || true)"
+            if [[ "$PING_STATUS" == "Online" ]]; then
+              ONLINE=true
+              break
+            fi
+            sleep 10
+          done
+
+          if [[ "$ONLINE" != "true" ]]; then
+            echo "Dashboard instance did not become available in Systems Manager."
+            exit 1
+          fi
+
+          COMMANDS=$(cat <<EOF
+          set -eu
+          for attempt in \$(seq 1 30); do
+            if [[ -f /etc/systemd/system/medislot-dashboard.service ]]; then break; fi
+            sleep 5
+          done
+          test -f /etc/systemd/system/medislot-dashboard.service
+          aws s3 cp "s3://${ARTIFACTS_BUCKET}/${DASHBOARD_CODE_KEY}" /tmp/medislot-dashboard-update.zip --region "${REGION}"
+          unzip -oq /tmp/medislot-dashboard-update.zip -d /opt/medislot/dashboard
+          chown -R ec2-user:ec2-user /opt/medislot/dashboard
+          /opt/medislot/venv/bin/pip install --disable-pip-version-check -r /opt/medislot/dashboard/requirements.txt
+          systemctl restart medislot-dashboard
+          systemctl is-active --quiet medislot-dashboard
+          EOF
+          )
+
+          PARAMETERS="$(jq -n --arg command "$COMMANDS" '{commands: [$command]}')"
+
+          COMMAND_ID="$(aws ssm send-command \
+            --instance-ids "$INSTANCE_ID" \
+            --document-name AWS-RunShellScript \
+            --parameters "$PARAMETERS" \
+            --comment "Deploy MediSlot dashboard ${GITHUB_SHA}" \
+            --region "$REGION" \
+            --query 'Command.CommandId' \
+            --output text)"
+
+          echo "Dashboard deployment command: $COMMAND_ID"
+
+          COMMAND_STATUS="Pending"
+          for attempt in $(seq 1 60); do
+            COMMAND_STATUS="$(aws ssm get-command-invocation \
+              --command-id "$COMMAND_ID" \
+              --instance-id "$INSTANCE_ID" \
+              --region "$REGION" \
+              --query 'Status' \
+              --output text 2>/dev/null || echo Pending)"
+
+            case "$COMMAND_STATUS" in
+              Success) break ;;
+              Failed|Cancelled|TimedOut|Cancelling) break ;;
+            esac
+            sleep 5
+          done
+
+          aws ssm get-command-invocation \
+            --command-id "$COMMAND_ID" \
+            --instance-id "$INSTANCE_ID" \
+            --region "$REGION" \
+            --query '{Status:Status,StandardOutput:StandardOutputContent,StandardError:StandardErrorContent}' \
+            --output json
+
+          if [[ "$COMMAND_STATUS" != "Success" ]]; then
+            echo "Dashboard package deployment failed with status: $COMMAND_STATUS"
+            exit 1
+          fi

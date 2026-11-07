@@ -50,10 +50,49 @@ def get_connection():
         port=int(os.getenv("DB_PORT", "3306")),
         cursorclass=pymysql.cursors.DictCursor,
         connect_timeout=5,
-        read_timeout=10,
+        read_timeout=20,
         write_timeout=10,
         autocommit=True,
     )
+
+
+def parse_date(value, field_name):
+    try:
+        return date.fromisoformat(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{field_name} must use YYYY-MM-DD format")
+
+
+def get_requested_range(query):
+    """Return an inclusive date range, retaining backward compatibility with ?date=."""
+    single_day = query.get("date")
+    start_value = query.get("start_date")
+    end_value = query.get("end_date")
+
+    if single_day and (start_value or end_value):
+        raise ValueError("Use either date or start_date/end_date, not both")
+
+    if single_day:
+        start_day = parse_date(single_day, "date")
+        end_day = start_day
+    elif start_value or end_value:
+        if not start_value or not end_value:
+            raise ValueError("Both start_date and end_date are required")
+        start_day = parse_date(start_value, "start_date")
+        end_day = parse_date(end_value, "end_date")
+    else:
+        raise ValueError(
+            "Provide date=YYYY-MM-DD or both start_date and end_date"
+        )
+
+    if end_day < start_day:
+        raise ValueError("end_date must be on or after start_date")
+
+    inclusive_days = (end_day - start_day).days + 1
+    if inclusive_days > 42:
+        raise ValueError("Date range cannot exceed 42 days")
+
+    return start_day, end_day
 
 
 def handler(event, context):
@@ -63,15 +102,10 @@ def handler(event, context):
         return response(403, {"message": "Doctor authorization required"})
 
     query = event.get("queryStringParameters") or {}
-    day = query.get("date")
-
-    if not day:
-        return response(400, {"message": "date query parameter is required (YYYY-MM-DD)"})
-
     try:
-        schedule_date = date.fromisoformat(day)
-    except (TypeError, ValueError):
-        return response(400, {"message": "date must use YYYY-MM-DD format"})
+        range_start, range_end = get_requested_range(query)
+    except ValueError as exc:
+        return response(400, {"message": str(exc)})
 
     connection = None
 
@@ -126,7 +160,7 @@ def handler(event, context):
                   AND s.start_at < DATE_ADD(%s, INTERVAL 1 DAY)
                 ORDER BY s.start_at, a.booked_at
                 """,
-                (doctor_id, schedule_date, schedule_date),
+                (doctor_id, range_start, range_end),
             )
 
             rows = cursor.fetchall()
@@ -167,11 +201,16 @@ def handler(event, context):
                     },
                 })
 
-        return response(200, {
-            "date": day,
+        result = {
+            "start_date": range_start.isoformat(),
+            "end_date": range_end.isoformat(),
             "timezone": "Asia/Kolkata",
             "slots": list(slots.values()),
-        })
+        }
+        if range_start == range_end:
+            result["date"] = range_start.isoformat()
+
+        return response(200, result)
 
     except Exception:
         logger.exception("Doctor day view failed")

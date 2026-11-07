@@ -137,6 +137,30 @@ def get_profile(connection, doctor_id):
         return profile
 
 
+def add_profile_photo_url(profile, doctor_id):
+    photo_key = profile.get("profile_photo_key")
+
+    if (
+        photo_key
+        and isinstance(photo_key, str)
+        and photo_key.startswith(f"doctor-profiles/{doctor_id}/")
+    ):
+        profile["profile_photo_url"] = s3.generate_presigned_url(
+            "get_object",
+            Params={
+                "Bucket": PRIVATE_FILES_BUCKET,
+                "Key": photo_key,
+            },
+            ExpiresIn=300,
+        )
+        profile["profile_photo_url_expires_in"] = 300
+    else:
+        profile["profile_photo_url"] = None
+        profile["profile_photo_url_expires_in"] = None
+
+    return profile
+
+
 def update_profile(connection, doctor_id, data):
     updates = {
         key: value
@@ -278,6 +302,8 @@ def handler(event, context):
                 if not profile:
                     return response(404, {"message": "Doctor not found"})
 
+                profile = add_profile_photo_url(profile, doctor_id)
+
                 return response(200, profile)
 
             if method == "PUT":
@@ -302,6 +328,10 @@ def handler(event, context):
                 connection.commit()
 
                 profile = get_profile(connection, doctor_id)
+
+                if profile:
+                    profile = add_profile_photo_url(profile, doctor_id)
+
                 return response(200, profile)
 
             return response(405, {"message": "Method not allowed"})
