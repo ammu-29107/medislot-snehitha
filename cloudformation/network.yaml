@@ -148,6 +148,11 @@ Resources:
           FromPort: 443
           ToPort: 443
           SourceSecurityGroupId: !Ref LambdaSecurityGroup
+        - Description: HTTPS from dashboard EC2 to VPC endpoints
+          IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          SourceSecurityGroupId: !Ref DashboardSecurityGroup
       Tags:
         - Key: Name
           Value: !Sub '${ProjectName}-${Environment}-vpc-endpoint-sg'
@@ -162,9 +167,38 @@ Resources:
           FromPort: 3306
           ToPort: 3306
           SourceSecurityGroupId: !Ref LambdaSecurityGroup
+        - Description: MySQL access from dashboard EC2
+          IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          SourceSecurityGroupId: !Ref DashboardSecurityGroup
       Tags:
         - Key: Name
           Value: !Sub '${ProjectName}-${Environment}-database-sg'
+
+  DashboardSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for MediSlot dashboard EC2
+      VpcId: !Ref MediSlotVPC
+      SecurityGroupIngress:
+        - Description: SSH access from anywhere
+          IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - Description: HTTP access to MediSlot dashboard
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-dashboard-sg'
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
 
   SsmVpcEndpoint:
     Type: AWS::EC2::VPCEndpoint
@@ -172,6 +206,19 @@ Resources:
       VpcEndpointType: Interface
       VpcId: !Ref MediSlotVPC
       ServiceName: !Sub 'com.amazonaws.${AWS::Region}.ssm'
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - !Ref PrivateSubnetA
+        - !Ref PrivateSubnetB
+      SecurityGroupIds:
+        - !Ref VpcEndpointSecurityGroup
+
+  SsmMessagesVpcEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcEndpointType: Interface
+      VpcId: !Ref MediSlotVPC
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.ssmmessages'
       PrivateDnsEnabled: true
       SubnetIds:
         - !Ref PrivateSubnetA
@@ -232,6 +279,12 @@ Outputs:
     Value: !Ref DatabaseSecurityGroup
     Export:
       Name: !Sub '${ProjectName}-${Environment}-DatabaseSecurityGroupId'
+
+  DashboardSecurityGroupId:
+    Description: Security group ID for the MediSlot dashboard EC2
+    Value: !Ref DashboardSecurityGroup
+    Export:
+      Name: !Sub '${ProjectName}-${Environment}-DashboardSecurityGroupId'
 
   PrivateRouteTableId:
     Description: ID of the private route table

@@ -1,0 +1,203 @@
+{% extends "base.html" %}
+{% block title %}Schedule & Calendar | MediSlot{% endblock %}
+{% set active_page = 'schedule' %}
+
+{% macro slot_card(slot, compact=false) -%}
+<article class="ms-calendar-event {{ 'is-compact' if compact else '' }}">
+    <div class="ms-event-time">{{ slot.start_at|ist_time }} – {{ slot.end_at|ist_time }}</div>
+    <div class="ms-event-title">{{ slot.consultation_type }}</div>
+    <div class="ms-event-meta">
+        <span class="ms-event-status status-{{ slot.status|lower }}">{{ slot.status|title }}</span>
+        <span>{{ slot.booked_count }}/{{ slot.capacity }} booked</span>
+    </div>
+    {% if slot.appointments %}
+        <div class="ms-event-patients">
+            {% for appointment in slot.appointments %}
+                <details class="ms-appointment-detail">
+                    <summary>
+                        <span class="ms-patient-dot"></span>
+                        {{ appointment.patient.full_name or 'Patient' }}
+                    </summary>
+                    <div class="ms-appointment-info">
+                        <strong>{{ appointment.booking_reference }}</strong>
+                        <span>{{ appointment.status|title }}</span>
+                        {% if appointment.patient.phone_number %}
+                            <span>{{ appointment.patient.phone_number }}</span>
+                        {% endif %}
+                        {% if appointment.patient.email %}
+                            <span>{{ appointment.patient.email }}</span>
+                        {% endif %}
+                    </div>
+                </details>
+            {% endfor %}
+        </div>
+    {% else %}
+        <div class="ms-event-empty">No confirmed appointment</div>
+    {% endif %}
+</article>
+{%- endmacro %}
+
+{% block body %}
+<div class="app-layout">
+    {% include "_sidebar.html" %}
+    <main class="main-content">
+        <header class="topbar">
+            <button class="menu-toggle" id="menuToggle" type="button" aria-label="Toggle navigation">☰</button>
+            <div>
+                <span class="topbar-label">DOCTOR PORTAL</span>
+                <h2>Schedule &amp; Calendar</h2>
+            </div>
+        </header>
+
+        <section class="page-content ms-calendar-page">
+            <div class="welcome-section">
+                <div>
+                    <p class="eyebrow">APPOINTMENT MANAGEMENT</p>
+                    <h1>Calendar</h1>
+                    <p class="muted">View your slots and confirmed patient appointments in day, week or month format.</p>
+                </div>
+                <a class="btn btn-secondary" href="{{ url_for('availability') }}">Manage availability →</a>
+            </div>
+
+            {% include "_flash_messages.html" %}
+
+            <section class="panel ms-calendar-panel">
+                <div class="ms-calendar-toolbar">
+                    <div class="ms-calendar-toolbar-left">
+                        <a class="btn btn-secondary" href="{{ url_for('schedule', date=previous_date, view=calendar_view) }}" aria-label="Previous period">‹</a>
+                        <a class="btn btn-secondary" href="{{ url_for('schedule', date=today_iso, view=calendar_view) }}">Today</a>
+                        <a class="btn btn-secondary" href="{{ url_for('schedule', date=next_date, view=calendar_view) }}" aria-label="Next period">›</a>
+                        <h3>{{ display_title }}</h3>
+                    </div>
+                    <nav class="ms-calendar-views" aria-label="Calendar view">
+                        <a class="{{ 'active' if calendar_view == 'day' else '' }}" href="{{ url_for('schedule', date=selected_date, view='day') }}">Day</a>
+                        <a class="{{ 'active' if calendar_view == 'week' else '' }}" href="{{ url_for('schedule', date=selected_date, view='week') }}">Week</a>
+                        <a class="{{ 'active' if calendar_view == 'month' else '' }}" href="{{ url_for('schedule', date=selected_date, view='month') }}">Month</a>
+                    </nav>
+                </div>
+
+                <form class="ms-calendar-date-jump" method="GET" action="{{ url_for('schedule') }}">
+                    <label for="calendar-date">Go to date</label>
+                    <input id="calendar-date" type="date" name="date" value="{{ selected_date }}" required>
+                    <input type="hidden" name="view" value="{{ calendar_view }}">
+                    <button class="btn btn-primary" type="submit">Go</button>
+                    <span class="timezone-note">All times shown in IST (Asia/Kolkata).</span>
+                </form>
+
+                {% if not schedule_loaded %}
+                    <div class="empty-state compact-empty">
+                        <h4>Calendar could not be loaded</h4>
+                        <p>Check the GET /doctor/day-view request and the doctor-day-view Lambda logs.</p>
+                    </div>
+                {% elif calendar_view == 'month' %}
+                    <div class="ms-month-grid">
+                        {% for weekday in ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] %}
+                            <div class="ms-month-weekday">{{ weekday }}</div>
+                        {% endfor %}
+                        {% for day in calendar_days %}
+                            <div class="ms-month-cell {{ 'outside-month' if day.date.month != selected_day.month else '' }} {{ 'is-today' if day.is_today else '' }} {{ 'is-selected' if day.is_selected else '' }}">
+                                <a class="ms-month-date" href="{{ url_for('schedule', date=day.date_iso, view='day') }}">{{ day.date.day }}</a>
+                                {% if day.slots %}
+                                    <div class="ms-month-count">{{ day.slots|length }} slot{{ '' if day.slots|length == 1 else 's' }} · {{ day.appointment_count }} appt{{ '' if day.appointment_count == 1 else 's' }}</div>
+                                    <div class="ms-month-events">
+                                        {% for slot in day.slots[:3] %}
+                                            <a class="ms-month-event" href="{{ url_for('schedule', date=day.date_iso, view='day') }}">
+                                                <strong>{{ slot.start_at|ist_time }}</strong> {{ slot.consultation_type }}
+                                            </a>
+                                        {% endfor %}
+                                        {% if day.slots|length > 3 %}
+                                            <a class="ms-more-events" href="{{ url_for('schedule', date=day.date_iso, view='day') }}">+{{ day.slots|length - 3 }} more</a>
+                                        {% endif %}
+                                    </div>
+                                {% else %}
+                                    <span class="ms-month-no-events">No slots</span>
+                                {% endif %}
+                            </div>
+                        {% endfor %}
+                    </div>
+                {% elif calendar_view == 'week' %}
+                    <div class="ms-week-grid">
+                        {% for day in calendar_days %}
+                            <section class="ms-week-day {{ 'is-today' if day.is_today else '' }} {{ 'is-selected' if day.is_selected else '' }}">
+                                <a class="ms-week-day-heading" href="{{ url_for('schedule', date=day.date_iso, view='day') }}">
+                                    <span>{{ day.date.strftime('%a') }}</span>
+                                    <strong>{{ day.date.day }}</strong>
+                                </a>
+                                <div class="ms-week-day-summary">{{ day.slots|length }} slots · {{ day.appointment_count }} appointments</div>
+                                <div class="ms-week-events">
+                                    {% for slot in day.slots %}
+                                        {{ slot_card(slot, true) }}
+                                    {% else %}
+                                        <div class="ms-calendar-no-slots">No slots</div>
+                                    {% endfor %}
+                                </div>
+                            </section>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <div class="ms-day-heading">
+                        <div>
+                            <span>{{ selected_day.strftime('%A') }}</span>
+                            <strong>{{ selected_day.strftime('%d %B %Y') }}</strong>
+                        </div>
+                        <span class="count-chip">{{ slots|length }} slots</span>
+                    </div>
+                    {% set selected_calendar_day = (calendar_days|first) %}
+                    <div class="ms-day-agenda">
+                        {% for slot in selected_calendar_day.slots %}
+                            <div class="ms-day-agenda-row">
+                                <div class="ms-day-time">
+                                    <strong>{{ slot.start_at|ist_time }}</strong>
+                                    <span>{{ slot.end_at|ist_time }}</span>
+                                </div>
+                                <div class="ms-day-agenda-content">
+                                    {{ slot_card(slot) }}
+                                </div>
+                            </div>
+                        {% else %}
+                            <div class="empty-state compact-empty">
+                                <h4>No slots scheduled for this day</h4>
+                                <p>Check your weekly availability or create an individual slot below.</p>
+                                <a class="text-link" href="{{ url_for('availability') }}">Review availability →</a>
+                            </div>
+                        {% endfor %}
+                    </div>
+                {% endif %}
+            </section>
+
+            <section class="panel">
+                <div class="panel-heading">
+                    <div>
+                        <h3>Create an individual slot</h3>
+                        <p class="muted">Create one future slot. Duration and capacity come from the selected consultation type.</p>
+                    </div>
+                </div>
+                {% if consultation_types %}
+                    <form method="POST" action="{{ url_for('schedule') }}" class="form-grid">
+                        <input type="hidden" name="schedule_date" value="{{ selected_date }}">
+                        <input type="hidden" name="calendar_view" value="{{ calendar_view }}">
+                        <div class="form-group">
+                            <label for="slot-consultation">Consultation type</label>
+                            <select id="slot-consultation" name="consultation_type_id" required>
+                                <option value="">Choose consultation type</option>
+                                {% for item in consultation_types %}
+                                    <option value="{{ item.consultation_type_id }}">{{ item.type_name }} · {{ item.duration_minutes }} min</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="slot-start">Start date &amp; time</label>
+                            <input id="slot-start" type="datetime-local" name="start_at" value="{{ selected_date }}T09:00" required>
+                        </div>
+                        <div class="form-actions form-actions-wide">
+                            <button type="submit" class="btn btn-primary">Create slot</button>
+                        </div>
+                    </form>
+                {% else %}
+                    <div class="inline-notice">Create an active consultation type before adding an individual slot.</div>
+                {% endif %}
+            </section>
+        </section>
+    </main>
+</div>
+{% endblock %}

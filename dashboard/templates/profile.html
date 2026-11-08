@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}My Profile | MediSlot{% endblock %}
+{% set active_page = 'profile' %}
+
+{% block body %}
+<div class="app-layout">
+    {% include "_sidebar.html" %}
+    <main class="main-content">
+        <header class="topbar">
+            <button class="menu-toggle" id="menuToggle" type="button" aria-label="Toggle navigation">☰</button>
+            <div>
+                <span class="topbar-label">DOCTOR PORTAL</span>
+                <h2>My Profile</h2>
+            </div>
+        </header>
+
+        <section class="page-content">
+            {% include "_flash_messages.html" %}
+            <div class="welcome-section">
+                <div>
+                    <p class="eyebrow">PERSONAL INFORMATION</p>
+                    <h1>My Professional Profile</h1>
+                    <p class="muted">Review your registered professional and account details.</p>
+                </div>
+                <a href="{{ url_for('edit_profile') }}" class="btn btn-primary">Edit profile</a>
+            </div>
+
+            <section class="panel profile-panel">
+                <div class="profile-header profile-header-expanded">
+                    {% if profile.profile_photo_url %}
+                        <div class="profile-photo-wrap">
+                            <img
+                                src="{{ profile.profile_photo_url }}"
+                                alt="Doctor profile photo"
+                                class="profile-photo image-preview-trigger"
+                                data-image-preview="{{ profile.profile_photo_url }}"
+                                data-image-expiry="{{ profile.profile_photo_url_expires_in or 300 }}"
+                                role="button"
+                                tabindex="0"
+                                aria-label="Open profile photo"
+                            >
+                            <a class="text-link photo-open-link" href="{{ profile.profile_photo_url }}" target="_blank" rel="noopener noreferrer">Open photo ↗</a>
+                        </div>
+                    {% else %}
+                        <div class="avatar profile-photo-fallback">{{ (profile.full_name or 'D')[:1]|upper }}</div>
+                    {% endif %}
+                    <div class="profile-heading-copy">
+                        <h2>{{ profile.full_name or 'Doctor' }}</h2>
+                        <p class="muted">{{ profile.qualifications or 'Qualifications not added' }}</p>
+                        <span class="status-badge {{ 'status-active' if profile.status == 'ACTIVE' else 'status-neutral' }}">{{ profile.status or 'Status unavailable' }}</span>
+                    </div>
+                </div>
+
+                <div class="profile-details-grid">
+                    <div><span class="detail-label">Email address</span><p>{{ profile.email or 'Not available' }}</p></div>
+                    <div><span class="detail-label">Medical license number</span><p>{{ profile.license_number or 'Not available' }}</p></div>
+                    <div><span class="detail-label">Hospital ID</span><p>{{ profile.hospital_id or 'Not added' }}</p></div>
+                    <div><span class="detail-label">Years of experience</span><p>{{ profile.experience_years if profile.experience_years is not none else 'Not added' }}</p></div>
+                    <div>
+                        <span class="detail-label">Specialities</span>
+                        <p>{% if profile.specialities %}{{ profile.specialities | map(attribute='speciality_name') | join(', ') }}{% else %}Not added{% endif %}</p>
+                    </div>
+                    <div><span class="detail-label">Account status</span><p>{{ profile.status or 'Not available' }}</p></div>
+                </div>
+
+                <div class="profile-bio">
+                    <h3>Professional bio</h3>
+                    <p>{{ profile.bio or 'No professional bio added yet.' }}</p>
+                </div>
+            </section>
+        </section>
+    </main>
+</div>
+{% endblock %}

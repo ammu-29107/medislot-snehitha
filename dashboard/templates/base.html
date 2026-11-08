@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="light dark">
+    <title>{% block title %}MediSlot Doctor Portal{% endblock %}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script>
+        (function () {
+            try {
+                const savedTheme = localStorage.getItem("medislot-theme");
+                document.documentElement.setAttribute("data-theme", savedTheme === "dark" ? "dark" : "light");
+            } catch (_) {
+                document.documentElement.setAttribute("data-theme", "light");
+            }
+        })();
+    </script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <script>
+        (function () {
+            try {
+                const savedTheme = localStorage.getItem("medislot-theme");
+                document.documentElement.setAttribute(
+                    "data-theme",
+                    savedTheme === "dark" ? "dark" : "light"
+                );
+            } catch (_) {
+                document.documentElement.setAttribute("data-theme", "light");
+            }
+        })();
+    </script>
+</head>
+<body>
+    {% block body %}{% endblock %}
+
+    <button
+        type="button"
+        class="theme-toggle"
+        id="themeToggle"
+        aria-label="Switch to dark mode"
+        aria-pressed="false"
+    >
+        <span class="theme-toggle-icon" aria-hidden="true">◐</span>
+        <span class="theme-toggle-label">Dark mode</span>
+    </button>
+
+    <div class="image-modal" id="imagePreviewModal" aria-hidden="true" role="dialog" aria-modal="true" aria-label="Profile photo preview">
+        <div class="image-modal-content" role="document">
+            <button type="button" class="image-modal-close" id="imageModalClose" aria-label="Close photo preview">×</button>
+            <img id="imageModalPhoto" src="" alt="Enlarged profile photo">
+            <p class="image-modal-caption" id="imageModalCaption">Profile photo</p>
+            <a id="imageModalOpenLink" class="text-link" href="#" target="_blank" rel="noopener noreferrer">Open image in a new tab ↗</a>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>

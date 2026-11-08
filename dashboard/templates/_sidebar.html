@@ -1,0 +1,34 @@
+<aside class="sidebar" id="sidebar">
+    <a class="sidebar-brand" href="{{ url_for('dashboard') }}">
+        <span class="brand-icon">M</span>
+        <span>MediSlot</span>
+    </a>
+
+    <div class="sidebar-label">WORKSPACE</div>
+    <nav class="sidebar-nav" aria-label="Doctor workspace">
+        <a href="{{ url_for('dashboard') }}" class="nav-link{% if active_page == 'dashboard' %} active{% endif %}">
+            <span class="nav-icon">▦</span><span>Dashboard</span>
+        </a>
+        <a href="{{ url_for('profile') }}" class="nav-link{% if active_page == 'profile' %} active{% endif %}">
+            <span class="nav-icon">♙</span><span>My Profile</span>
+        </a>
+        <a href="{{ url_for('consultation_types') }}" class="nav-link{% if active_page == 'consultation_types' %} active{% endif %}">
+            <span class="nav-icon">▤</span><span>Consultation Types</span>
+        </a>
+        <a href="{{ url_for('availability') }}" class="nav-link{% if active_page == 'availability' %} active{% endif %}">
+            <span class="nav-icon">◷</span><span>Availability</span>
+        </a>
+        <a href="{{ url_for('schedule') }}" class="nav-link{% if active_page == 'schedule' %} active{% endif %}">
+            <span class="nav-icon">▦</span><span>Schedule &amp; Slots</span>
+        </a>
+        <a href="{{ url_for('blackout_dates') }}" class="nav-link{% if active_page == 'blackout_dates' %} active{% endif %}">
+            <span class="nav-icon">▧</span><span>Blackout Dates</span>
+        </a>
+    </nav>
+
+    <div class="sidebar-bottom">
+        <a href="{{ url_for('logout') }}" class="nav-link">
+            <span class="nav-icon">↪</span><span>Logout</span>
+        </a>
+    </div>
+</aside>

@@ -14,13 +14,11 @@ logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 JWT_SECRET_PARAMETER = os.environ["JWT_SECRET_PARAMETER"]
 JWT_ISSUER = os.environ.get("JWT_ISSUER", "medislot")
 JWT_AUDIENCE = os.environ.get("JWT_AUDIENCE", "medislot-api")
-ACCESS_TOKENS_TABLE = os.environ["ACCESS_TOKENS_TABLE"]
 SESSIONS_TABLE = os.environ["SESSIONS_TABLE"]
 
 ssm = boto3.client("ssm")
 dynamodb = boto3.resource("dynamodb")
 
-access_table = dynamodb.Table(ACCESS_TOKENS_TABLE)
 sessions_table = dynamodb.Table(SESSIONS_TABLE)
 
 try:
@@ -78,21 +76,6 @@ def handler(event, context):
         ):
             return {"isAuthorized": False}
 
-        result = access_table.get_item(
-            Key={"jti": jti},
-            ConsistentRead=True,
-        )
-        item = result.get("Item")
-
-        if (
-            not item
-            or item.get("revoked") is True
-            or int(item.get("expiryTimestamp", 0)) <= int(time.time())
-            or str(item.get("userId")) != str(user_id)
-            or item.get("role") != role
-        ):
-            return {"isAuthorized": False}
-
         session_result = sessions_table.get_item(
             Key={"session_id": session_id},
             ConsistentRead=True,
@@ -108,7 +91,6 @@ def handler(event, context):
             or int(active_session.get("expiryTimestamp", 0)) <= now
             or str(active_session.get("userId")) != str(user_id)
             or active_session.get("role") != role
-            or item.get("session_id") != session_id
         ):
             return {"isAuthorized": False}
 
@@ -125,6 +107,6 @@ def handler(event, context):
     except (jwt.InvalidTokenError, ValueError, TypeError):
         return {"isAuthorized": False}
     except (BotoCoreError, ClientError):
-        logger.exception("Unable to verify access-token record")
+        logger.exception("Unable to verify session")
         # Fail closed if DynamoDB cannot be checked.
         return {"isAuthorized": False}

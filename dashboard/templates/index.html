@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Welcome | MediSlot{% endblock %}
+{% block body %}
+<div class="auth-page portal-choice-page">
+    <a class="auth-brand" href="{{ url_for('index') }}">
+        <span class="brand-icon">M</span>
+        <span>MediSlot</span>
+    </a>
+    <main class="portal-choice-card">
+        <p class="auth-eyebrow">Healthcare, made simpler</p>
+        <h1>Welcome to MediSlot</h1>
+        <p class="auth-subtitle">Choose how you would like to continue.</p>
+
+        <div class="portal-choice-grid">
+            <a class="portal-choice" href="{{ url_for('login', role='doctor') }}">
+                <span class="portal-choice-icon doctor-icon">✚</span>
+                <span class="portal-choice-title">I'm a Doctor</span>
+                <span class="portal-choice-copy">Manage your profile, availability and appointments.</span>
+                <span class="portal-choice-action">Continue to Doctor Portal <span aria-hidden="true">→</span></span>
+            </a>
+            <a class="portal-choice" href="{{ url_for('login', role='patient') }}">
+                <span class="portal-choice-icon patient-icon">♥</span>
+                <span class="portal-choice-title">I'm a Patient</span>
+                <span class="portal-choice-copy">Access your patient account and healthcare journey.</span>
+                <span class="portal-choice-action">Continue to Patient Portal <span aria-hidden="true">→</span></span>
+            </a>
+        </div>
+        <p class="auth-footnote">New to MediSlot? Choose your portal to create an account.</p>
+    </main>
+</div>
+{% endblock %}
