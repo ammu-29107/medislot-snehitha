@@ -1,5 +1,5 @@
-import os
 import logging
+import os
 from pathlib import Path
 
 import boto3
@@ -9,8 +9,32 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 
+def execute_sql_file(cursor, sql_path):
+    if not sql_path.is_file():
+        raise FileNotFoundError(f"SQL file not found: {sql_path}")
+
+    sql_text = sql_path.read_text(encoding="utf-8")
+    sql_lines = [
+        line
+        for line in sql_text.splitlines()
+        if not line.lstrip().startswith("--")
+        and not line.lstrip().startswith("#")
+    ]
+    sql_without_comments = "\n".join(sql_lines)
+    statements = [
+        statement.strip()
+        for statement in sql_without_comments.split(";")
+        if statement.strip()
+    ]
+
+    for statement in statements:
+        cursor.execute(statement)
+
+    return len(statements)
+
+
 def handler(event, context):
-    """Apply the MediSlot SQL schema to the configured MySQL database."""
+    """Apply the MediSlot schema and idempotent reference-data seed."""
 
     db_host = os.environ["DB_HOST"]
     db_port = int(os.environ.get("DB_PORT", "3306"))
@@ -18,19 +42,16 @@ def handler(event, context):
     db_user = os.environ["DB_USER"]
     password_parameter = os.environ["DB_PASSWORD_PARAMETER"]
 
-    # schema.sql is packaged alongside this handler.
-    schema_path = Path(__file__).parent / "schema.sql"
-    if not schema_path.is_file():
-        raise FileNotFoundError(f"Schema file not found: {schema_path}")
+    package_dir = Path(__file__).parent
+    schema_path = package_dir / "schema.sql"
+    seed_path = package_dir / "seed.sql"
 
     ssm = boto3.client("ssm")
-    response = ssm.get_parameter(
+    parameter = ssm.get_parameter(
         Name=password_parameter,
         WithDecryption=True,
     )
-    db_password = response["Parameter"]["Value"]
-
-    schema_sql = schema_path.read_text(encoding="utf-8")
+    db_password = parameter["Parameter"]["Value"]
 
     connection = pymysql.connect(
         host=db_host,
@@ -46,36 +67,23 @@ def handler(event, context):
     )
 
     try:
-        # This schema contains ordinary CREATE statements, not stored
-        # procedures or triggers. Execute each statement separately.
-        # Remove full-line SQL comments before splitting statements.
-        sql_lines = [
-            line
-            for line in schema_sql.splitlines()
-            if not line.lstrip().startswith("--")
-            and not line.lstrip().startswith("#")
-        ]
-        sql_without_comments = "\n".join(sql_lines)
-
-        statements = [
-            statement.strip()
-            for statement in sql_without_comments.split(";")
-            if statement.strip()
-        ]
-
         with connection.cursor() as cursor:
-            for statement in statements:
-                cursor.execute(statement)
+            schema_statements = execute_sql_file(cursor, schema_path)
+            seed_statements = execute_sql_file(cursor, seed_path)
 
         logger.info(
-            "Schema applied successfully to database '%s' on configured RDS.",
+            "Schema and reference data applied successfully to '%s'. "
+            "schema_statements=%s seed_statements=%s",
             db_name,
+            schema_statements,
+            seed_statements,
         )
 
         return {
             "status": "SUCCESS",
             "database": db_name,
-            "statements_executed": len(statements),
+            "schema_statements_executed": schema_statements,
+            "seed_statements_executed": seed_statements,
         }
     finally:
         connection.close()

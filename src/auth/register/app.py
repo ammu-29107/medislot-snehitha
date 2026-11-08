@@ -85,10 +85,55 @@ def handler(event, context):
     try:
         route_key = event.get("routeKey", "")
         raw_path = event.get("rawPath", "")
+        request_context = event.get("requestContext") or {}
+        http_context = request_context.get("http") or {}
 
         # Support API Gateway HTTP API and REST API event formats.
-        path = route_key.split(" ")[-1] if route_key else raw_path
+        if route_key:
+            parts = route_key.split(" ", 1)
+            method = parts[0].upper()
+            path = parts[1] if len(parts) > 1 else raw_path
+        else:
+            method = str(http_context.get("method") or event.get("httpMethod") or "POST").upper()
+            path = raw_path or (event.get("path") or "")
         path = path.rstrip("/").lower()
+
+        if method == "GET" and path.endswith("/registration/options"):
+            connection = get_db_connection()
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT hospital_id, hospital_name, city
+                    FROM hospitals
+                    WHERE status = 'ACTIVE'
+                    ORDER BY hospital_name
+                    """
+                )
+                hospitals = [
+                    {"hospitalId": row[0], "hospitalName": row[1], "city": row[2]}
+                    for row in cursor.fetchall()
+                ]
+
+                cursor.execute(
+                    """
+                    SELECT speciality_id, speciality_name
+                    FROM specialities
+                    WHERE status = 'ACTIVE'
+                    ORDER BY speciality_name
+                    """
+                )
+                specialities = [
+                    {"specialityId": row[0], "specialityName": row[1]}
+                    for row in cursor.fetchall()
+                ]
+
+            return response(
+                200,
+                {"hospitals": hospitals, "specialities": specialities},
+            )
+
+        if method != "POST":
+            return response(405, {"message": "Method not allowed"})
 
         if path.endswith("/register/doctor"):
             role = "DOCTOR"

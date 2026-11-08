@@ -170,7 +170,17 @@ def doctor_required(view):
     @wraps(view)
     def wrapped(*args, **kwargs):
         if not session.get("access_token") or session.get("role") != "DOCTOR":
-            return redirect(url_for("login"))
+            return redirect(url_for("login", role="doctor"))
+        return view(*args, **kwargs)
+
+    return wrapped
+
+
+def patient_required(view):
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if not session.get("access_token") or session.get("role") != "PATIENT":
+            return redirect(url_for("login", role="patient"))
         return view(*args, **kwargs)
 
     return wrapped
@@ -212,37 +222,93 @@ def ist_time(value):
 
 @app.route("/")
 def index():
-    if session.get("access_token") and session.get("role") == "DOCTOR":
-        return redirect(url_for("dashboard"))
-    return redirect(url_for("login"))
+    if session.get("access_token"):
+        if session.get("role") == "DOCTOR":
+            return redirect(url_for("dashboard"))
+        if session.get("role") == "PATIENT":
+            return redirect(url_for("patient_dashboard"))
+    return render_template("index.html")
 
 
-@app.route("/login", methods=["GET", "POST"])
-def login():
+def _normalise_role(role):
+    role = (role or "").strip().lower()
+    return role if role in {"doctor", "patient"} else None
+
+
+def _load_registration_options():
+    try:
+        response = _send_api_request("GET", "/registration/options")
+        data = _decode_response(response)
+        if response.status_code == 200:
+            return data, None
+        return {"hospitals": [], "specialities": []}, data.get(
+            "message", "Unable to load hospital and speciality options."
+        )
+    except requests.RequestException:
+        app.logger.exception("Unable to load doctor registration options")
+        return {"hospitals": [], "specialities": []}, (
+            "Unable to load hospital and speciality options. Please try again."
+        )
+
+
+def _render_registration(role, form_data=None):
+    options = {"hospitals": [], "specialities": []}
+    options_error = None
+    if role == "doctor":
+        options, options_error = _load_registration_options()
+    return render_template(
+        "register.html",
+        role=role,
+        hospitals=options.get("hospitals", []),
+        specialities=options.get("specialities", []),
+        options_error=options_error,
+        form_data=form_data or {},
+        today=date.today().isoformat(),
+    )
+
+
+@app.route("/login", defaults={"role": None}, methods=["GET", "POST"])
+@app.route("/login/<role>", methods=["GET", "POST"])
+def login(role):
+    role = _normalise_role(role)
+    if role is None:
+        return redirect(url_for("index"))
+
+    if session.get("access_token"):
+        if session.get("role") == "DOCTOR":
+            return redirect(url_for("dashboard"))
+        if session.get("role") == "PATIENT":
+            return redirect(url_for("patient_dashboard"))
+
     if request.method == "POST":
         email = request.form.get("email", "").strip()
         password = request.form.get("password", "")
 
         if not email or not password:
             flash("Please enter your email address and password.", "error")
-            return render_template("login.html")
+            return render_template("login.html", role=role)
 
         try:
-            response = requests.post(
-                f"{API_BASE_URL}/login/doctor",
+            response = _send_api_request(
+                "POST",
+                f"/login/{role}",
                 json={"email": email, "password": password},
-                headers={"Accept": "application/json"},
-                timeout=15,
             )
             data = _decode_response(response)
 
-            if response.status_code == 200 and data.get("accessToken") and data.get("refreshToken"):
+            if (
+                response.status_code == 200
+                and data.get("accessToken")
+                and data.get("refreshToken")
+            ):
                 session.clear()
                 session["access_token"] = data["accessToken"]
                 session["refresh_token"] = data["refreshToken"]
-                session["role"] = "DOCTOR"
+                session["role"] = role.upper()
                 flash("Signed in successfully.", "success")
-                return redirect(url_for("dashboard"))
+                if role == "doctor":
+                    return redirect(url_for("dashboard"))
+                return redirect(url_for("patient_dashboard"))
 
             flash(data.get("message", "Login failed. Check your credentials."), "error")
 
@@ -250,7 +316,103 @@ def login():
             app.logger.exception("Unable to reach the MediSlot login endpoint")
             flash("Unable to connect to MediSlot. Please try again.", "error")
 
-    return render_template("login.html")
+    return render_template("login.html", role=role)
+
+
+@app.route("/register/<role>", methods=["GET", "POST"])
+def register(role):
+    role = _normalise_role(role)
+    if role is None:
+        return redirect(url_for("index"))
+
+    if session.get("access_token"):
+        if session.get("role") == "DOCTOR":
+            return redirect(url_for("dashboard"))
+        if session.get("role") == "PATIENT":
+            return redirect(url_for("patient_dashboard"))
+
+    if request.method == "GET":
+        return _render_registration(role)
+
+    full_name = request.form.get("fullName", "").strip()
+    email = request.form.get("email", "").strip()
+    password = request.form.get("password", "")
+
+    if not full_name or not email or not password:
+        flash("Please complete all required fields.", "error")
+        return _render_registration(role, request.form)
+
+    payload = {
+        "fullName": full_name,
+        "email": email,
+        "password": password,
+    }
+
+    if role == "doctor":
+        hospital_id = request.form.get("hospitalId", "").strip()
+        speciality_values = request.form.getlist("specialityIds")
+        license_number = request.form.get("licenseNumber", "").strip()
+        qualifications = request.form.get("qualifications", "").strip()
+        experience_years = request.form.get("experienceYears", "").strip()
+
+        try:
+            payload["hospitalId"] = int(hospital_id)
+            payload["specialityIds"] = [int(value) for value in speciality_values]
+            if experience_years:
+                payload["experienceYears"] = int(experience_years)
+        except (TypeError, ValueError):
+            flash("Select a valid hospital and at least one speciality.", "error")
+            return _render_registration(role, request.form)
+
+        payload["licenseNumber"] = license_number
+        if qualifications:
+            payload["qualifications"] = qualifications
+
+        if not license_number or not payload["specialityIds"]:
+            flash("License number and at least one speciality are required.", "error")
+            return _render_registration(role, request.form)
+
+    else:
+        payload.update({
+            "dateOfBirth": request.form.get("dateOfBirth", "").strip(),
+            "phoneNumber": request.form.get("phoneNumber", "").strip(),
+            "gender": request.form.get("gender", "").strip(),
+        })
+        if not all(payload[key] for key in ("dateOfBirth", "phoneNumber", "gender")):
+            flash("Please complete your date of birth, phone number and gender.", "error")
+            return _render_registration(role, request.form)
+
+    try:
+        response = _send_api_request("POST", f"/register/{role}", json=payload)
+        data = _decode_response(response)
+
+        if response.status_code == 201:
+            flash("Your account has been created. Please sign in.", "success")
+            return redirect(url_for("login", role=role))
+
+        flash(data.get("message", "Registration failed. Please review your details."), "error")
+
+    except requests.RequestException:
+        app.logger.exception("Unable to reach the MediSlot registration endpoint")
+        flash("Unable to connect to MediSlot. Please try again.", "error")
+
+    return _render_registration(role, request.form)
+
+
+@app.route("/patient/dashboard")
+@patient_required
+def patient_dashboard():
+    profile_data, profile_status = call_doctor_api("GET", "/profile")
+    if profile_status == 200:
+        profile = profile_data.get("profile", {})
+    else:
+        profile = {}
+        flash(
+            profile_data.get("message", "Unable to load your patient profile."),
+            "error",
+        )
+
+    return render_template("patient_dashboard.html", profile=profile)
 
 
 @app.route("/dashboard")
@@ -812,7 +974,7 @@ def logout():
                 "You have been signed out locally. Server-side logout could not be confirmed. Please sign in again.",
                 "warning",
             )
-    return redirect(url_for("login"))
+    return redirect(url_for("index"))
 
 
 if __name__ == "__main__":

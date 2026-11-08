@@ -323,6 +323,13 @@ Resources:
       RouteKey: 'POST /register/patient'
       Target: !Sub 'integrations/${RegisterIntegration}'
 
+  RegistrationOptionsRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref AuthHttpApi
+      RouteKey: 'GET /registration/options'
+      Target: !Sub 'integrations/${RegisterIntegration}'
+
   LoginDoctorRoute:
     Type: AWS::ApiGatewayV2::Route
     Properties:
@@ -386,6 +393,14 @@ Resources:
       Action: lambda:InvokeFunction
       Principal: apigateway.amazonaws.com
       SourceArn: !Sub 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${AuthHttpApi}/*/POST/register/*'
+
+  RegisterOptionsInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref RegisterFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${AuthHttpApi}/*/GET/registration/options'
 
   AuthenticationLoginInvokePermission:
     Type: AWS::Lambda::Permission

@@ -1,0 +1,165 @@
+{% extends "base.html" %}
+{% set role_label = "Doctor" if role == "doctor" else "Patient" %}
+{% block title %}{{ role_label }} Registration | MediSlot{% endblock %}
+{% block body %}
+<div class="auth-page auth-page-register">
+    <a class="auth-brand" href="{{ url_for('index') }}">
+        <span class="brand-icon">M</span>
+        <span>MediSlot</span>
+    </a>
+
+    <main class="auth-card auth-card-wide">
+        <a class="auth-back-link" href="{{ url_for('login', role=role) }}">← Back to {{ role }} sign in</a>
+        <div class="auth-symbol">{% if role == "doctor" %}✚{% else %}♥{% endif %}</div>
+        <p class="auth-eyebrow">Create your account</p>
+        <h1>Join MediSlot as a {{ role_label|lower }}</h1>
+        <p class="auth-subtitle">Enter your details to get started.</p>
+
+        {% include "_flash_messages.html" %}
+        {% if options_error and role == "doctor" %}
+            <div class="auth-inline-warning">{{ options_error }}</div>
+        {% endif %}
+
+        <form method="POST" action="{{ url_for('register', role=role) }}" class="auth-form">
+            <div class="form-grid auth-form-grid">
+                <div class="form-group form-group-full">
+                    <label for="fullName">Full name</label>
+                    <input type="text" id="fullName" name="fullName" maxlength="150" value="{{ form_data.get('fullName', '') }}" autocomplete="name" placeholder="Enter your full name" required>
+                </div>
+                <div class="form-group form-group-full">
+                    <label for="email">Email address</label>
+                    <input type="email" id="email" name="email" maxlength="254" value="{{ form_data.get('email', '') }}" autocomplete="email" placeholder="you@example.com" required>
+                </div>
+                <div class="form-group form-group-full">
+                    <label for="password">Password</label>
+                    <div class="password-input-wrap">
+                        <input type="password" id="password" name="password" minlength="12" maxlength="72" autocomplete="new-password" placeholder="Create a strong password" required>
+                        <button type="button" class="password-toggle" data-toggle-password="password" aria-label="Show password" aria-pressed="false">Show</button>
+                    </div>
+                    <small>12–72 characters, including uppercase, lowercase, number and special character.</small>
+                </div>
+                <div class="form-group form-group-full">
+                    <label for="confirmPassword">Confirm password</label>
+                    <div class="password-input-wrap">
+                        <input type="password" id="confirmPassword" minlength="12" maxlength="72" autocomplete="new-password" placeholder="Re-enter your password" required aria-describedby="passwordMatchMessage">
+                        <button type="button" class="password-toggle" data-toggle-password="confirmPassword" aria-label="Show confirm password" aria-pressed="false">Show</button>
+                    </div>
+                    <small id="passwordMatchMessage" class="password-match-message" aria-live="polite">Re-enter the same password to confirm it.</small>
+                </div>
+
+                {% if role == "doctor" %}
+                    <div class="form-group">
+                        <label for="licenseNumber">Medical license number</label>
+                        <input type="text" id="licenseNumber" name="licenseNumber" maxlength="100" value="{{ form_data.get('licenseNumber', '') }}" placeholder="Enter license number" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="hospitalId">Hospital / clinic</label>
+                        <select id="hospitalId" name="hospitalId" required>
+                            <option value="">Select hospital</option>
+                            {% for hospital in hospitals %}
+                                <option value="{{ hospital.hospitalId }}" {% if form_data.get('hospitalId', '')|string == hospital.hospitalId|string %}selected{% endif %}>{{ hospital.hospitalName }}{% if hospital.city %} — {{ hospital.city }}{% endif %}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-group form-group-full">
+                        <label for="specialityIds">Specialities</label>
+                        <select id="specialityIds" name="specialityIds" multiple required size="5">
+                            {% set selected_specialities = form_data.getlist('specialityIds') if form_data and form_data.getlist is defined else [] %}
+                            {% for speciality in specialities %}
+                                <option value="{{ speciality.specialityId }}" {% if speciality.specialityId|string in selected_specialities %}selected{% endif %}>{{ speciality.specialityName }}</option>
+                            {% endfor %}
+                        </select>
+                        <small>You can select more than one speciality. Use Ctrl (Windows) or Command (Mac) to select multiple options.</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="qualifications">Qualifications <span class="optional-label">Optional</span></label>
+                        <input type="text" id="qualifications" name="qualifications" maxlength="500" value="{{ form_data.get('qualifications', '') }}" placeholder="e.g. MBBS, MD">
+                    </div>
+                    <div class="form-group">
+                        <label for="experienceYears">Years of experience <span class="optional-label">Optional</span></label>
+                        <input type="number" id="experienceYears" name="experienceYears" min="0" max="80" value="{{ form_data.get('experienceYears', '') }}" placeholder="e.g. 5">
+                    </div>
+                    {% if not hospitals or not specialities %}
+                        <p class="auth-inline-warning form-group-full">Doctor registration options are not available right now. Please refresh this page after the registration-options API is deployed.</p>
+                    {% endif %}
+                {% else %}
+                    <div class="form-group">
+                        <label for="dateOfBirth">Date of birth</label>
+                        <input type="date" id="dateOfBirth" name="dateOfBirth" max="{{ today }}" value="{{ form_data.get('dateOfBirth', '') }}" autocomplete="bday" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="phoneNumber">Phone number</label>
+                        <input type="tel" id="phoneNumber" name="phoneNumber" pattern="\+?[0-9]{10,15}" maxlength="16" value="{{ form_data.get('phoneNumber', '') }}" placeholder="e.g. +919876543210" autocomplete="tel" required>
+                    </div>
+                    <div class="form-group form-group-full">
+                        <label for="gender">Gender</label>
+                        <select id="gender" name="gender" required>
+                            <option value="">Select gender</option>
+                            <option value="MALE" {% if form_data.get('gender') == 'MALE' %}selected{% endif %}>Male</option>
+                            <option value="FEMALE" {% if form_data.get('gender') == 'FEMALE' %}selected{% endif %}>Female</option>
+                            <option value="NON_BINARY" {% if form_data.get('gender') == 'NON_BINARY' %}selected{% endif %}>Non-binary</option>
+                            <option value="PREFER_NOT_TO_SAY" {% if form_data.get('gender') == 'PREFER_NOT_TO_SAY' %}selected{% endif %}>Prefer not to say</option>
+                        </select>
+                    </div>
+                {% endif %}
+            </div>
+            <button type="submit" class="btn btn-primary btn-full" disabled {% if role == 'doctor' and (not hospitals or not specialities) %}data-options-unavailable="true"{% endif %}>Create {{ role_label }} account</button>
+        </form>
+
+        <p class="auth-switch">Already have an account? <a href="{{ url_for('login', role=role) }}">Sign in here</a></p>
+    </main>
+</div>
+
+<script>
+(() => {
+    const form = document.querySelector('.auth-form');
+    if (!form) return;
+
+    const password = form.querySelector('#password');
+    const confirmPassword = form.querySelector('#confirmPassword');
+    const matchMessage = form.querySelector('#passwordMatchMessage');
+    const submitButton = form.querySelector('button[type="submit"]');
+    const optionsUnavailable = submitButton?.dataset.optionsUnavailable === 'true';
+
+    function validatePasswordMatch() {
+        const hasBothValues = password.value.length > 0 && confirmPassword.value.length > 0;
+        const matches = hasBothValues && password.value === confirmPassword.value;
+
+        confirmPassword.setCustomValidity(
+            confirmPassword.value && !matches ? 'Passwords do not match.' : ''
+        );
+
+        if (!confirmPassword.value) {
+            matchMessage.textContent = 'Re-enter the same password to confirm it.';
+            matchMessage.classList.remove('is-match', 'is-error');
+        } else if (matches) {
+            matchMessage.textContent = 'Passwords match.';
+            matchMessage.classList.add('is-match');
+            matchMessage.classList.remove('is-error');
+        } else {
+            matchMessage.textContent = 'Passwords do not match.';
+            matchMessage.classList.add('is-error');
+            matchMessage.classList.remove('is-match');
+        }
+
+        submitButton.disabled = optionsUnavailable || !matches;
+    }
+
+    password.addEventListener('input', validatePasswordMatch);
+    confirmPassword.addEventListener('input', validatePasswordMatch);
+
+    form.querySelectorAll('[data-toggle-password]').forEach((toggle) => {
+        toggle.addEventListener('click', () => {
+            const input = form.querySelector(`#${toggle.dataset.togglePassword}`);
+            const shouldShow = input.type === 'password';
+            input.type = shouldShow ? 'text' : 'password';
+            toggle.textContent = shouldShow ? 'Hide' : 'Show';
+            toggle.setAttribute('aria-label', `${shouldShow ? 'Hide' : 'Show'} ${input.id === 'password' ? 'password' : 'confirm password'}`);
+            toggle.setAttribute('aria-pressed', String(shouldShow));
+        });
+    });
+
+    validatePasswordMatch();
+})();
+</script>
+{% endblock %}

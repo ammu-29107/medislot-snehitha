@@ -178,6 +178,7 @@ jobs:
 
           cp src/database/schema_apply.py "$PACKAGE_DIR/schema_apply.py"
           cp database/schema.sql "$PACKAGE_DIR/schema.sql"
+          cp database/seed.sql "$PACKAGE_DIR/seed.sql"
 
           (
             cd "$PACKAGE_DIR"

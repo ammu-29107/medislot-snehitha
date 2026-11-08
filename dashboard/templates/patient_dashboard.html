@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Patient Portal | MediSlot{% endblock %}
+{% block body %}
+<div class="patient-portal-page">
+    <header class="patient-portal-header">
+        <a class="auth-brand" href="{{ url_for('patient_dashboard') }}"><span class="brand-icon">M</span><span>MediSlot</span></a>
+        <a class="patient-logout" href="{{ url_for('logout') }}">Sign out</a>
+    </header>
+    <main class="patient-portal-main">
+        <section class="patient-welcome-card">
+            <div>
+                <p class="auth-eyebrow">Patient portal</p>
+                <h1>Welcome{% if profile.get('full_name') %}, {{ profile.get('full_name') }}{% endif %}</h1>
+                <p class="auth-subtitle">You are signed in to your MediSlot patient account.</p>
+            </div>
+            <span class="patient-welcome-icon">♥</span>
+        </section>
+        <section class="patient-account-card">
+            <h2>Your account</h2>
+            <dl class="patient-account-details">
+                <div><dt>Full name</dt><dd>{{ profile.get('full_name', '—') }}</dd></div>
+                <div><dt>Email</dt><dd>{{ profile.get('email', '—') }}</dd></div>
+                <div><dt>Phone</dt><dd>{{ profile.get('phone_number', '—') }}</dd></div>
+                <div><dt>Date of birth</dt><dd>{{ profile.get('date_of_birth', '—') }}</dd></div>
+                <div><dt>Account status</dt><dd>{{ profile.get('status', '—') }}</dd></div>
+            </dl>
+        </section>
+        <section class="patient-next-card">
+            <span class="patient-next-icon">✚</span>
+            <div>
+                <h2>Your patient portal is ready</h2>
+                <p>Doctor discovery, appointment booking and appointment history will be connected here as the patient services are implemented.</p>
+            </div>
+        </section>
+    </main>
+</div>
+{% endblock %}
