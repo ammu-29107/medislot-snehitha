@@ -14,6 +14,7 @@ on:
       - 'src/auth/**'
       - 'src/doctor/**'
       - 'dashboard/**'
+      - 'tests/**'
   push:
     branches:
       - feature/*
@@ -27,6 +28,7 @@ on:
       - 'src/auth/**'
       - 'src/doctor/**'
       - 'dashboard/**'
+      - 'tests/**'
   workflow_dispatch:
 
 permissions:
@@ -41,14 +43,37 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install validation dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r src/auth/authorizer/requirements.txt pytest cfn-lint
+
+      - name: Run authorizer unit tests
+        run: python -m pytest -q tests/test_authorizer.py
+
       - name: Validate config.json
         run: jq empty config.json
 
       - name: Validate CloudFormation templates
         run: |
-          pip install cfn-lint
           cfn-lint cloudformation/network.yaml cloudformation/data.yaml cloudformation/auth.yaml cloudformation/doctor.yaml cloudformation/dashboard.yaml
 
+      - name: Scan repository for secrets
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Scan CloudFormation templates
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: cloudformation/
+          framework: cloudformation
+          soft_fail: true
 
   deploy-network:
     name: Deploy network stack
@@ -459,6 +484,7 @@ jobs:
           echo "environment=$(jq -r '.Environment' config.json)" >> "$GITHUB_OUTPUT"
           echo "stack_prefix=$(jq -r '.StackPrefix' config.json)" >> "$GITHUB_OUTPUT"
           echo "project_name=$(jq -r '.ProjectName' config.json)" >> "$GITHUB_OUTPUT"
+          echo "bcrypt_work_factor=$(jq -r '.BcryptWorkFactor' config.json)" >> "$GITHUB_OUTPUT"
 
       - name: Configure AWS credentials using OIDC
         uses: aws-actions/configure-aws-credentials@v4
@@ -473,6 +499,7 @@ jobs:
           JWT_SIGNING_SECRET: ${{ secrets.JWT_SIGNING_SECRET }}
           PROJECT_NAME: ${{ steps.config.outputs.project_name }}
           ENVIRONMENT: ${{ steps.config.outputs.environment }}
+          BCRYPT_WORK_FACTOR: ${{ steps.config.outputs.bcrypt_work_factor }}
         run: |
           set -euo pipefail
 
@@ -490,6 +517,12 @@ jobs:
             --name "/${PROJECT_NAME}/${ENVIRONMENT}/database/password" \
             --type SecureString \
             --value "$DB_PASSWORD" \
+            --overwrite
+
+          aws ssm put-parameter \
+            --name "/${PROJECT_NAME}/${ENVIRONMENT}/auth/bcrypt-work-factor" \
+            --type String \
+            --value "$BCRYPT_WORK_FACTOR" \
             --overwrite
 
           aws ssm put-parameter \
@@ -708,12 +741,30 @@ jobs:
           echo "environment=$(jq -r '.Environment' config.json)" >> "$GITHUB_OUTPUT"
           echo "stack_prefix=$(jq -r '.StackPrefix' config.json)" >> "$GITHUB_OUTPUT"
           echo "project_name=$(jq -r '.ProjectName' config.json)" >> "$GITHUB_OUTPUT"
+          echo "slot_window_days=$(jq -r '.SlotWindowDays' config.json)" >> "$GITHUB_OUTPUT"
 
       - name: Configure AWS credentials using OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ steps.config.outputs.region }}
+
+      - name: Provision slot window setting in SSM
+        shell: bash
+        env:
+          SLOT_WINDOW_DAYS: ${{ steps.config.outputs.slot_window_days }}
+          PROJECT_NAME: ${{ steps.config.outputs.project_name }}
+          ENVIRONMENT: ${{ steps.config.outputs.environment }}
+          REGION: ${{ steps.config.outputs.region }}
+        run: |
+          set -euo pipefail
+
+          aws ssm put-parameter \
+            --name "/${PROJECT_NAME}/${ENVIRONMENT}/scheduling/slot-window-days" \
+            --type String \
+            --value "$SLOT_WINDOW_DAYS" \
+            --overwrite \
+            --region "$REGION"
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5

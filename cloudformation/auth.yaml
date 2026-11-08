@@ -98,6 +98,7 @@ Resources:
                 Resource:
                   - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/medislot/${Environment}/database/password'
                   - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/medislot/${Environment}/auth/jwt-signing-secret'
+                  - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${ProjectName}/${Environment}/auth/bcrypt-work-factor'
 
               - Sid: RefreshTokenTableAccess
                 Effect: Allow
@@ -172,6 +173,7 @@ Resources:
           DB_USER: !Ref DatabaseUsername
           DB_PASSWORD_PARAMETER: !Sub '/medislot/${Environment}/database/password'
           LOG_LEVEL: INFO
+          BCRYPT_WORK_FACTOR_PARAMETER: !Sub '/${ProjectName}/${Environment}/auth/bcrypt-work-factor'
 
   AuthenticationFunction:
     Type: AWS::Lambda::Function

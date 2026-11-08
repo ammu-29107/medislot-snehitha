@@ -24,7 +24,12 @@ DB_PASSWORD = ssm.get_parameter(
     WithDecryption=True,
 )["Parameter"]["Value"]
 
-BCRYPT_WORK_FACTOR = 12
+BCRYPT_WORK_FACTOR = int(
+    ssm.get_parameter(
+        Name=os.environ["BCRYPT_WORK_FACTOR_PARAMETER"],
+        WithDecryption=True
+    )["Parameter"]["Value"]
+)
 
 
 def response(status_code, body):

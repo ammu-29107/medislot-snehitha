@@ -19,7 +19,12 @@ DB_USER = os.environ["DB_USER"]
 DB_PASSWORD_PARAMETER = os.environ["DB_PASSWORD_PARAMETER"]
 
 IST = ZoneInfo("Asia/Kolkata")
-WINDOW_DAYS = 30
+WINDOW_DAYS = int(
+    ssm.get_parameter(
+        Name=os.environ["SLOT_WINDOW_DAYS_PARAMETER"],
+        WithDecryption=True
+    )["Parameter"]["Value"]
+)
 
 
 def get_connection():

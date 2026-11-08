@@ -189,7 +189,9 @@ Resources:
             Statement:
               - Effect: Allow
                 Action: ssm:GetParameter
-                Resource: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${ProjectName}/${Environment}/database/password'
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${ProjectName}/${Environment}/database/password'
+                  - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${ProjectName}/${Environment}/scheduling/slot-window-days'
 
   # --------------------------------------------------
   # LAMBDA FUNCTIONS
@@ -405,6 +407,7 @@ Resources:
           DB_USER: !Ref DatabaseUsername
           DB_PASSWORD_PARAMETER: !Sub '/${ProjectName}/${Environment}/database/password'
           LOG_LEVEL: INFO
+          SLOT_WINDOW_DAYS_PARAMETER: !Sub '/${ProjectName}/${Environment}/scheduling/slot-window-days'
 
   # --------------------------------------------------
   # EXISTING HTTP API REFERENCES
