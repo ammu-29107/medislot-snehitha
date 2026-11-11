@@ -114,13 +114,51 @@ CREATE TABLE IF NOT EXISTS patients (
     UNIQUE KEY uq_patients_email (email)
 ) ENGINE=InnoDB;
 
--- 6. CONSULTATION TYPES
+-- 6. CONSULTATION TYPE CATALOGUE
+CREATE TABLE IF NOT EXISTS consultation_type_catalogue (
+    catalogue_id TINYINT UNSIGNED NOT NULL,
+    type_name VARCHAR(100) NOT NULL,
+    duration_minutes SMALLINT UNSIGNED NOT NULL,
+    min_capacity SMALLINT UNSIGNED NOT NULL DEFAULT 1,
+    max_capacity SMALLINT UNSIGNED NOT NULL DEFAULT 1,
+
+    PRIMARY KEY (catalogue_id),
+    UNIQUE KEY uq_consultation_catalogue_name (type_name),
+
+    CONSTRAINT chk_catalogue_duration
+        CHECK (duration_minutes > 0),
+
+    CONSTRAINT chk_catalogue_capacity
+        CHECK (
+            min_capacity > 0
+            AND max_capacity >= min_capacity
+        )
+) ENGINE=InnoDB;
+
+INSERT INTO consultation_type_catalogue (
+    catalogue_id,
+    type_name,
+    duration_minutes,
+    min_capacity,
+    max_capacity
+)
+VALUES
+    (1, 'Quick Consult', 15, 1, 1),
+    (2, 'Standard Consult', 30, 1, 1),
+    (3, 'Detailed Consult', 60, 1, 1),
+    (4, 'Health Camp Session', 60, 2, 10)
+ON DUPLICATE KEY UPDATE
+    type_name = VALUES(type_name),
+    duration_minutes = VALUES(duration_minutes),
+    min_capacity = VALUES(min_capacity),
+    max_capacity = VALUES(max_capacity);
+
+-- 7. DOCTOR CONSULTATION TYPES
 CREATE TABLE IF NOT EXISTS consultation_types (
     consultation_type_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     doctor_id BIGINT UNSIGNED NOT NULL,
-    type_name VARCHAR(100) NOT NULL,
+    catalogue_id TINYINT UNSIGNED NOT NULL,
     description VARCHAR(500) NULL,
-    duration_minutes SMALLINT UNSIGNED NOT NULL,
     capacity SMALLINT UNSIGNED NOT NULL DEFAULT 1,
     consultation_fee DECIMAL(10,2) NOT NULL DEFAULT 0.00,
     status ENUM('ACTIVE', 'DISABLED') NOT NULL DEFAULT 'ACTIVE',
@@ -129,28 +167,35 @@ CREATE TABLE IF NOT EXISTS consultation_types (
         ON UPDATE CURRENT_TIMESTAMP,
 
     PRIMARY KEY (consultation_type_id),
+
     UNIQUE KEY uq_consultation_type_doctor_id
         (doctor_id, consultation_type_id),
-    UNIQUE KEY uq_consultation_types_doctor_name (doctor_id, type_name),
-    KEY idx_consultation_types_doctor_status (doctor_id, status),
 
-    CONSTRAINT chk_consultation_duration
-        CHECK (duration_minutes > 0),
+    UNIQUE KEY uq_consultation_types_doctor_catalogue
+        (doctor_id, catalogue_id),
+
+    KEY idx_consultation_types_doctor_status
+        (doctor_id, status),
 
     CONSTRAINT chk_consultation_fee
         CHECK (consultation_fee >= 0),
 
     CONSTRAINT chk_consultation_capacity
         CHECK (
-            (type_name = 'Health Camp Session' AND capacity BETWEEN 2 AND 10)
+            (catalogue_id = 4 AND capacity BETWEEN 2 AND 10)
             OR
-            (type_name <> 'Health Camp Session' AND capacity = 1)
+            (catalogue_id IN (1, 2, 3) AND capacity = 1)
         ),
 
     CONSTRAINT fk_consultation_types_doctor
         FOREIGN KEY (doctor_id)
         REFERENCES doctors (doctor_id)
         ON UPDATE CASCADE
+        ON DELETE RESTRICT,
+
+    CONSTRAINT fk_consultation_types_catalogue
+        FOREIGN KEY (catalogue_id)
+        REFERENCES consultation_type_catalogue (catalogue_id)
         ON DELETE RESTRICT
 ) ENGINE=InnoDB;
 

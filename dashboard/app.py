@@ -1,4 +1,5 @@
 import os
+import json
 import logging
 import uuid
 from datetime import date, datetime, timedelta
@@ -59,6 +60,32 @@ Session(app)
 
 logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"))
 
+
+@app.before_request
+def start_request_timer():
+    request.environ["medislot_start_time"] = perf_counter()
+    request.environ["medislot_correlation_id"] = (
+        request.headers.get("X-Correlation-ID") or uuid.uuid4().hex
+    )
+
+
+@app.after_request
+def log_dashboard_request(response):
+    started = request.environ.get("medislot_start_time", perf_counter())
+    correlation_id = request.environ.get("medislot_correlation_id")
+
+    log_record = {
+        "event": "dashboard_request",
+        "correlation_id": correlation_id,
+        "method": request.method,
+        "route": request.path,
+        "status": response.status_code,
+        "duration_ms": round((perf_counter() - started) * 1000),
+    }
+
+    app.logger.info(json.dumps(log_record))
+    response.headers["X-Correlation-ID"] = correlation_id
+    return response
 
 def _decode_response(response):
     try:
@@ -536,7 +563,10 @@ def edit_profile():
             upload_info, upload_status = call_doctor_api(
                 "POST",
                 "/doctor/profile/photo-upload-url",
-                json={"content_type": uploaded_file.mimetype},
+                json={
+                    "content_type": uploaded_file.mimetype,
+                    "content_length": len(photo_bytes),
+                },
             )
             if upload_status != 200 or not upload_info.get("upload_url") or not upload_info.get("photo_key"):
                 flash(upload_info.get("message", "Could not generate a photo upload URL."), "error")
@@ -546,7 +576,10 @@ def edit_profile():
                 upload_response = requests.put(
                     upload_info["upload_url"],
                     data=photo_bytes,
-                    headers={"Content-Type": upload_info["content_type"]},
+                    headers={
+                        "Content-Type": upload_info["content_type"],
+                        "Content-Length": str(len(photo_bytes)),
+                    },
                     timeout=30,
                 )
                 upload_response.raise_for_status()
@@ -575,9 +608,8 @@ def edit_profile():
 def consultation_types():
     if request.method == "POST":
         payload = {
-            "type_name": request.form.get("type_name", "").strip(),
+            "catalogue_id": request.form.get("catalogue_id"),
             "description": request.form.get("description", "").strip(),
-            "duration_minutes": request.form.get("duration_minutes"),
             "capacity": request.form.get("capacity", 1),
             "consultation_fee": request.form.get("consultation_fee", 0),
         }
@@ -588,6 +620,7 @@ def consultation_types():
         flash(data.get("message", "Unable to create consultation type."), "error")
 
     data, status = call_doctor_api("GET", "/doctor/consultation-types")
+    catalogue_types = data.get("catalogue", [])
     if status != 200:
         flash(data.get("message", "Unable to load consultation types."), "error")
         types = []
@@ -596,6 +629,7 @@ def consultation_types():
     return render_template(
         "consultation_types.html",
         consultation_types=types,
+        catalogue_types=catalogue_types,
         active_page="consultation_types",
     )
 
@@ -604,9 +638,7 @@ def consultation_types():
 @doctor_required
 def update_consultation_type(type_id):
     payload = {
-        "type_name": request.form.get("type_name", "").strip(),
         "description": request.form.get("description", "").strip(),
-        "duration_minutes": request.form.get("duration_minutes"),
         "capacity": request.form.get("capacity", 1),
         "consultation_fee": request.form.get("consultation_fee", 0),
     }

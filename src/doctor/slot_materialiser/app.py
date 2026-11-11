@@ -2,7 +2,7 @@
 import os
 import json
 import logging
-from datetime import datetime, date, time, timedelta
+from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 import boto3
@@ -74,45 +74,90 @@ def handler(event, context):
         window_start = now.date()
         window_end = window_start + timedelta(days=WINDOW_DAYS)
 
+        window_start_dt = datetime.combine(window_start, time.min)
+        window_end_dt = datetime.combine(window_end, time.min)
+
         connection = get_connection()
 
         generated_count = 0
         skipped_count = 0
 
         with connection.cursor() as cursor:
+            # Discover eligible doctors.
             cursor.execute(
                 """
-                SELECT
-                    d.doctor_id,
-                    p.pattern_id,
-                    p.day_of_week,
-                    p.start_time,
-                    p.end_time,
-                    c.consultation_type_id,
-                    c.duration_minutes,
-                    c.capacity
+                SELECT DISTINCT d.doctor_id
                 FROM doctors d
                 INNER JOIN doctor_availability_patterns p
                     ON p.doctor_id = d.doctor_id
-                INNER JOIN consultation_types c
-                    ON c.consultation_type_id = p.consultation_type_id
-                   AND c.doctor_id = p.doctor_id
+                INNER JOIN consultation_types ct
+                    ON ct.consultation_type_id = p.consultation_type_id
+                   AND ct.doctor_id = p.doctor_id
                 WHERE d.status = 'ACTIVE'
                   AND p.status = 'ACTIVE'
-                  AND c.status = 'ACTIVE'
-                ORDER BY d.doctor_id, p.pattern_id
+                  AND ct.status = 'ACTIVE'
+                ORDER BY d.doctor_id
                 """
             )
 
-            patterns = cursor.fetchall()
+            doctor_ids = [
+                row["doctor_id"] for row in cursor.fetchall()
+            ]
 
-            doctors = {}
+            # End the discovery transaction. Each doctor gets
+            # an independent transaction and a fresh read snapshot.
+            connection.commit()
 
-            for pattern in patterns:
-                doctor_id = pattern["doctor_id"]
-                doctors.setdefault(doctor_id, []).append(pattern)
+            for doctor_id in doctor_ids:
 
-            for doctor_id, doctor_patterns in doctors.items():
+                # Acquire the same doctor-row lock used by
+                # the scheduling and blackout POST operations.
+                cursor.execute(
+                    """
+                    SELECT doctor_id
+                    FROM doctors
+                    WHERE doctor_id = %s
+                      AND status = 'ACTIVE'
+                    FOR UPDATE
+                    """,
+                    (doctor_id,),
+                )
+
+                if not cursor.fetchone():
+                    connection.commit()
+                    continue
+
+                # Fetch patterns only after acquiring the lock.
+                cursor.execute(
+                    """
+                    SELECT
+                        p.pattern_id,
+                        p.day_of_week,
+                        p.start_time,
+                        p.end_time,
+                        ct.consultation_type_id,
+                        c.duration_minutes,
+                        ct.capacity
+                    FROM doctor_availability_patterns p
+                    INNER JOIN consultation_types ct
+                        ON ct.consultation_type_id =
+                           p.consultation_type_id
+                       AND ct.doctor_id = p.doctor_id
+                    INNER JOIN consultation_type_catalogue c
+                        ON c.catalogue_id = ct.catalogue_id
+                    WHERE p.doctor_id = %s
+                      AND p.status = 'ACTIVE'
+                      AND ct.status = 'ACTIVE'
+                    ORDER BY p.pattern_id
+                    """,
+                    (doctor_id,),
+                )
+
+                doctor_patterns = cursor.fetchall()
+
+                if not doctor_patterns:
+                    connection.commit()
+                    continue
 
                 cursor.execute(
                     """
@@ -124,28 +169,46 @@ def handler(event, context):
                     """,
                     (
                         doctor_id,
-                        datetime.combine(window_end, time.min),
-                        datetime.combine(window_start, time.min),
+                        window_end_dt,
+                        window_start_dt,
                     ),
                 )
+
                 blackouts = cursor.fetchall()
 
                 cursor.execute(
                     """
-                    SELECT start_at, end_at
+                    SELECT start_at, end_at, status
                     FROM slots
                     WHERE doctor_id = %s
-                      AND status <> 'CANCELLED'
-                      AND start_at < %s
-                      AND end_at > %s
+                    AND start_at < %s
+                    AND end_at > %s
                     """,
                     (
                         doctor_id,
-                        datetime.combine(window_end, time.min),
-                        datetime.combine(window_start, time.min),
+                        window_end_dt,
+                        window_start_dt,
                     ),
                 )
-                existing_slots = cursor.fetchall()
+
+                all_slots = cursor.fetchall()
+
+                # Only non-cancelled slots block overlapping availability.
+                existing_slots = [
+                    {
+                        "start_at": slot["start_at"],
+                        "end_at": slot["end_at"],
+                    }
+                    for slot in all_slots
+                    if slot["status"] != "CANCELLED"
+                ]
+
+                # Track all existing time ranges because the database
+                # unique constraint also applies to cancelled slots.
+                existing_slot_keys = {
+                    (slot["start_at"], slot["end_at"])
+                    for slot in all_slots
+                }
 
                 for pattern in doctor_patterns:
                     pattern_start = db_time_to_time(
@@ -164,10 +227,13 @@ def handler(event, context):
                             pattern["day_of_week"]
                         ):
                             slot_start = datetime.combine(
-                                current_date, pattern_start
+                                current_date,
+                                pattern_start,
                             )
+
                             availability_end = datetime.combine(
-                                current_date, pattern_end
+                                current_date,
+                                pattern_end,
                             )
 
                             while True:
@@ -202,14 +268,18 @@ def handler(event, context):
                                     for existing in existing_slots
                                 )
 
-                                if blocked or occupied:
+                                if (
+                                    blocked
+                                    or occupied
+                                    or (slot_start, slot_end) in existing_slot_keys
+                                ):
                                     skipped_count += 1
                                     slot_start = slot_end
                                     continue
 
                                 cursor.execute(
                                     """
-                                    INSERT IGNORE INTO slots (
+                                    INSERT INTO slots (
                                         doctor_id,
                                         consultation_type_id,
                                         pattern_id,
@@ -219,9 +289,7 @@ def handler(event, context):
                                         booked_count,
                                         status
                                     )
-                                    VALUES (
-                                        %s, %s, %s, %s, %s, %s, 0, 'OPEN'
-                                    )
+                                    VALUES (%s, %s, %s, %s, %s, %s, 0, 'OPEN')
                                     """,
                                     (
                                         doctor_id,
@@ -233,27 +301,31 @@ def handler(event, context):
                                     ),
                                 )
 
-                                if cursor.rowcount == 1:
-                                    generated_count += 1
-                                    existing_slots.append({
-                                        "start_at": slot_start,
-                                        "end_at": slot_end,
-                                    })
-                                else:
-                                    skipped_count += 1
+                                generated_count += 1
+
+                                existing_slots.append({
+                                    "start_at": slot_start,
+                                    "end_at": slot_end,
+                                })
+
+                                existing_slot_keys.add((slot_start, slot_end))
 
                                 slot_start = slot_end
 
                         current_date += timedelta(days=1)
 
-        connection.commit()
+                # Release this doctor's lock before processing
+                # the next doctor.
+                connection.commit()
 
         result = {
             "message": "Slot materialisation completed",
             "slots_created": generated_count,
             "slots_skipped": skipped_count,
             "window_start": window_start.isoformat(),
-            "window_end": (window_end - timedelta(days=1)).isoformat(),
+            "window_end": (
+                window_end - timedelta(days=1)
+            ).isoformat(),
             "timezone": "Asia/Kolkata",
         }
 

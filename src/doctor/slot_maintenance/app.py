@@ -57,12 +57,6 @@ def handler(event, context):
                 SET s.status = 'COMPLETED'
                 WHERE s.status = 'OPEN'
                   AND s.end_at <= %s
-                  AND NOT EXISTS (
-                      SELECT 1
-                      FROM appointments a
-                      WHERE a.slot_id = s.slot_id
-                        AND a.status = 'CONFIRMED'
-                  )
                 """,
                 (now_ist,),
             )

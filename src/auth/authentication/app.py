@@ -14,6 +14,7 @@ import bcrypt
 import jwt
 import pymysql
 from botocore.exceptions import BotoCoreError, ClientError
+from boto3.dynamodb.types import TypeSerializer
 
 
 logger = logging.getLogger()
@@ -33,6 +34,14 @@ JWT_AUDIENCE = os.environ["JWT_AUDIENCE"]
 
 REFRESH_TOKENS_TABLE = os.environ["REFRESH_TOKENS_TABLE"]
 SESSIONS_TABLE = os.environ["SESSIONS_TABLE"]
+dynamodb_serializer = TypeSerializer()
+
+
+def serialize_item(item):
+    return {
+        key: dynamodb_serializer.serialize(value)
+        for key, value in item.items()
+    }
 
 ACCESS_TOKEN_TTL_SECONDS = int(
     os.getenv("ACCESS_TOKEN_TTL_SECONDS", "900")
@@ -201,20 +210,11 @@ def handle_login(event, body, correlation_id):
             refresh_token.encode("utf-8")
         ).hexdigest()
 
-        logger.info(
-            "Login transaction types: user_id=%s, access_jti=%s, "
-            "refresh_token_hash=%s, session_id=%s",
-            type(user_id).__name__,
-            type(access_jti).__name__,
-            type(refresh_token_hash).__name__,
-            type(session_id).__name__,
-        )
-
         transaction_items = [
             {
                 "Put": {
                     "TableName": REFRESH_TOKENS_TABLE,
-                    "Item": {
+                    "Item": serialize_item({
                         "tokenHash": refresh_token_hash,
                         "session_id": session_id,
                         "userId": user_id,
@@ -222,21 +222,21 @@ def handle_login(event, body, correlation_id):
                         "status": "ACTIVE",
                         "expiryTimestamp": session_expiry,
                         "createdAt": now,
-                    },
+                    }),
                     "ConditionExpression": "attribute_not_exists(tokenHash)",
                 }
             },
             {
                 "Put": {
                     "TableName": SESSIONS_TABLE,
-                    "Item": {
+                    "Item": serialize_item({
                         "session_id": session_id,
                         "userId": user_id,
                         "role": role,
                         "status": "ACTIVE",
                         "expiryTimestamp": session_expiry,
                         "createdAt": now,
-                    },
+                    }),
                     "ConditionExpression": "attribute_not_exists(session_id)",
                 }
             },
@@ -451,7 +451,7 @@ def handle_logout(event, body):
                 {
                     "Update": {
                         "TableName": REFRESH_TOKENS_TABLE,
-                        "Key": {"tokenHash": token_hash},
+                        "Key": serialize_item({"tokenHash": token_hash}),
                         "UpdateExpression": "SET #status = :revoked, revokedAt = :now",
                         "ConditionExpression": (
                             "userId = :user_id "
@@ -464,20 +464,20 @@ def handle_logout(event, body):
                             "#status": "status",
                             "#role": "role",
                         },
-                        "ExpressionAttributeValues": {
+                        "ExpressionAttributeValues": serialize_item({
                             ":revoked": "REVOKED",
                             ":active": "ACTIVE",
                             ":now": now,
                             ":user_id": str(user_id),
                             ":session_id": session_id,
                             ":role": role,
-                        },
+                        }),
                     }
                 },
                 {
                     "Update": {
                         "TableName": SESSIONS_TABLE,
-                        "Key": {"session_id": session_id},
+                        "Key": serialize_item({"session_id": session_id}),
                         "UpdateExpression": "SET #status = :revoked, revokedAt = :now",
                         "ConditionExpression": (
                             "userId = :user_id "
@@ -489,13 +489,13 @@ def handle_logout(event, body):
                             "#status": "status",
                             "#role": "role",
                         },
-                        "ExpressionAttributeValues": {
+                        "ExpressionAttributeValues": serialize_item({
                             ":revoked": "REVOKED",
                             ":active": "ACTIVE",
                             ":now": now,
                             ":user_id": str(user_id),
                             ":role": role,
-                        },
+                        }),
                     }
                 }
             ]

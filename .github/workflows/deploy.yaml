@@ -18,6 +18,7 @@ on:
   push:
     branches:
       - feature/*
+      - fix/*
     paths:
       - 'config.json'
       - 'README.md'
@@ -53,10 +54,16 @@ jobs:
       - name: Install validation dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r src/auth/authorizer/requirements.txt pytest cfn-lint
+          python -m pip install pytest cfn-lint
+          while IFS= read -r file; do
+            python -m pip install -r "$file"
+          done < <(find src dashboard -name requirements.txt -type f | sort)
 
-      - name: Run authorizer unit tests
-        run: python -m pytest -q tests/test_authorizer.py
+      - name: Compile Python code
+        run: python -m compileall -q src dashboard tests
+
+      - name: Run all unit tests
+        run: python -m pytest -q tests/
 
       - name: Validate config.json
         run: jq empty config.json

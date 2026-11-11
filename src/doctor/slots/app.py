@@ -2,7 +2,8 @@
 import os
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta
+from decimal import Decimal, InvalidOperation
 from zoneinfo import ZoneInfo
 
 import boto3
@@ -28,6 +29,9 @@ def response(status, body):
         "body": json.dumps(body, default=str),
     }
 
+
+class SchedulingConflictError(Exception):
+    pass
 
 def get_connection():
     password = ssm.get_parameter(
@@ -88,18 +92,37 @@ def parse_datetime(value):
 
     return parsed
 
+def parse_positive_integer(value, field_name):
+    if value is None or isinstance(value, bool):
+        raise ValueError(f"Invalid {field_name}")
 
-def ensure_active_doctor(cursor, doctor_id):
-    cursor.execute(
-        """
+    try:
+        number = Decimal(str(value))
+    except (TypeError, ValueError, InvalidOperation):
+        raise ValueError(f"Invalid {field_name}")
+
+    if (
+        not number.is_finite()
+        or number != number.to_integral_value()
+        or number <= 0
+    ):
+        raise ValueError(f"Invalid {field_name}")
+
+    return int(number)
+
+
+def ensure_active_doctor(cursor, doctor_id, lock=False):
+    sql = """
         SELECT doctor_id
         FROM doctors
         WHERE doctor_id = %s
           AND status = 'ACTIVE'
-        FOR UPDATE
-        """,
-        (doctor_id,),
-    )
+    """
+
+    if lock:
+        sql += " FOR UPDATE"
+
+    cursor.execute(sql, (doctor_id,))
 
     if not cursor.fetchone():
         raise LookupError("Active doctor profile not found")
@@ -108,13 +131,13 @@ def ensure_active_doctor(cursor, doctor_id):
 def create_slot(cursor, doctor_id, data):
     consultation_type_id = data.get("consultation_type_id")
 
-    if not consultation_type_id:
+    if consultation_type_id is None:
         raise ValueError("consultation_type_id is required")
 
-    try:
-        consultation_type_id = int(consultation_type_id)
-    except (TypeError, ValueError):
-        raise ValueError("Invalid consultation_type_id")
+    consultation_type_id = parse_positive_integer(
+        consultation_type_id,
+        "consultation_type_id",
+    )
 
     start_at = parse_datetime(data.get("start_at"))
 
@@ -124,12 +147,14 @@ def create_slot(cursor, doctor_id, data):
     cursor.execute(
         """
         SELECT
-            duration_minutes,
-            capacity
-        FROM consultation_types
-        WHERE consultation_type_id = %s
-          AND doctor_id = %s
-          AND status = 'ACTIVE'
+            catalogue.duration_minutes,
+            consultation.capacity
+        FROM consultation_types AS consultation
+        JOIN consultation_type_catalogue AS catalogue
+            ON catalogue.catalogue_id = consultation.catalogue_id
+        WHERE consultation.consultation_type_id = %s
+        AND consultation.doctor_id = %s
+        AND consultation.status = 'ACTIVE'
         FOR UPDATE
         """,
         (consultation_type_id, doctor_id),
@@ -140,8 +165,6 @@ def create_slot(cursor, doctor_id, data):
     if not consultation:
         raise LookupError("Active consultation type not found")
 
-    end_at = start_at.replace() 
-    from datetime import timedelta
     end_at = start_at + timedelta(
         minutes=int(consultation["duration_minutes"])
     )
@@ -159,7 +182,9 @@ def create_slot(cursor, doctor_id, data):
     )
 
     if cursor.fetchone():
-        raise ValueError("Slot overlaps a doctor blackout period")
+        raise SchedulingConflictError(
+            "Slot overlaps a doctor blackout period"
+        )
 
     cursor.execute(
         """
@@ -168,14 +193,15 @@ def create_slot(cursor, doctor_id, data):
         WHERE doctor_id = %s
           AND start_at < %s
           AND end_at > %s
-          AND status <> 'CANCELLED'
         LIMIT 1
         """,
         (doctor_id, end_at, start_at),
     )
 
     if cursor.fetchone():
-        raise ValueError("Slot overlaps an existing slot")
+        raise SchedulingConflictError(
+            "Slot overlaps an existing slot"
+        )
 
     cursor.execute(
         """
@@ -263,7 +289,9 @@ def create_blackout(cursor, doctor_id, data):
     )
 
     if cursor.fetchone():
-        raise ValueError("Blackout overlaps an existing blackout")
+        raise SchedulingConflictError(
+            "Blackout overlaps an existing blackout"
+        )
 
     cursor.execute(
         """
@@ -281,7 +309,7 @@ def create_blackout(cursor, doctor_id, data):
     affected_slots = cursor.fetchall()
 
     if any(int(slot["booked_count"]) > 0 for slot in affected_slots):
-        raise ValueError(
+        raise SchedulingConflictError(
             "Blackout affects booked slots. "
             "Use the leave cancellation workflow first."
         )
@@ -364,7 +392,11 @@ def handler(event, context):
         connection = get_connection()
 
         with connection.cursor() as cursor:
-            ensure_active_doctor(cursor, doctor_id)
+            ensure_active_doctor(
+                cursor,
+                doctor_id,
+                lock=(method == "POST"),
+            )
 
             if is_slot_route and method == "GET":
                 result = list_slots(cursor, doctor_id, query)
@@ -405,10 +437,15 @@ def handler(event, context):
 
         return response(405, {"message": "Method not allowed"})
 
-    except ValueError as exc:
+    except SchedulingConflictError as exc:
         if connection:
             connection.rollback()
         return response(409, {"message": str(exc)})
+
+    except ValueError as exc:
+        if connection:
+            connection.rollback()
+        return response(400, {"message": str(exc)})
 
     except LookupError as exc:
         if connection:
