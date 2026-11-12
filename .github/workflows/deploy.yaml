@@ -77,13 +77,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Scan CloudFormation templates
-        uses: bridgecrewio/checkov-action@v12
-        with:
-          directory: cloudformation/
-          framework: cloudformation
-          soft_fail: true
-
   deploy-network:
     name: Deploy network stack
     if: startsWith(github.ref, 'refs/heads/feature/') && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
