@@ -79,7 +79,7 @@ jobs:
 
   deploy-network:
     name: Deploy network stack
-    if: startsWith(github.ref, 'refs/heads/feature/') && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    if: startsWith(github.ref, 'refs/heads/') && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     needs: validate
     runs-on: ubuntu-latest
 
@@ -126,7 +126,7 @@ jobs:
 
   deploy-data:
     name: Deploy database and data resources
-    if: startsWith(github.ref, 'refs/heads/feature/') && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    if: startsWith(github.ref, 'refs/heads/') && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     needs: deploy-network
     runs-on: ubuntu-latest
 
@@ -466,7 +466,7 @@ jobs:
 
   deploy-auth:
     name: Package and deploy authentication API
-    if: startsWith(github.ref, 'refs/heads/feature/') && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    if: startsWith(github.ref, 'refs/heads/') && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     needs: deploy-data
     runs-on: ubuntu-latest
 
@@ -723,7 +723,7 @@ jobs:
 
   deploy-doctor:
     name: Package and deploy doctor APIs
-    if: startsWith(github.ref, 'refs/heads/feature/') && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    if: startsWith(github.ref, 'refs/heads/') && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     needs: deploy-auth
     runs-on: ubuntu-latest
 
@@ -914,7 +914,7 @@ jobs:
 
   deploy-dashboard:
     name: Package and deploy doctor dashboard
-    if: startsWith(github.ref, 'refs/heads/feature/') && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    if: startsWith(github.ref, 'refs/heads/') && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     needs: deploy-doctor
     runs-on: ubuntu-latest
 
