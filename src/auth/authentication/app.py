@@ -214,7 +214,7 @@ def handle_login(event, body, correlation_id):
             {
                 "Put": {
                     "TableName": REFRESH_TOKENS_TABLE,
-                    "Item": serialize_item({
+                    "Item": {
                         "tokenHash": refresh_token_hash,
                         "session_id": session_id,
                         "userId": user_id,
@@ -222,21 +222,21 @@ def handle_login(event, body, correlation_id):
                         "status": "ACTIVE",
                         "expiryTimestamp": session_expiry,
                         "createdAt": now,
-                    }),
+                    },
                     "ConditionExpression": "attribute_not_exists(tokenHash)",
                 }
             },
             {
                 "Put": {
                     "TableName": SESSIONS_TABLE,
-                    "Item": serialize_item({
+                    "Item": {
                         "session_id": session_id,
                         "userId": user_id,
                         "role": role,
                         "status": "ACTIVE",
                         "expiryTimestamp": session_expiry,
                         "createdAt": now,
-                    }),
+                    },
                     "ConditionExpression": "attribute_not_exists(session_id)",
                 }
             },
@@ -451,7 +451,7 @@ def handle_logout(event, body):
                 {
                     "Update": {
                         "TableName": REFRESH_TOKENS_TABLE,
-                        "Key": serialize_item({"tokenHash": token_hash}),
+                        "Key": {"tokenHash": token_hash},
                         "UpdateExpression": "SET #status = :revoked, revokedAt = :now",
                         "ConditionExpression": (
                             "userId = :user_id "
@@ -464,20 +464,20 @@ def handle_logout(event, body):
                             "#status": "status",
                             "#role": "role",
                         },
-                        "ExpressionAttributeValues": serialize_item({
+                        "ExpressionAttributeValues": {
                             ":revoked": "REVOKED",
                             ":active": "ACTIVE",
                             ":now": now,
                             ":user_id": str(user_id),
                             ":session_id": session_id,
                             ":role": role,
-                        }),
+                        },
                     }
                 },
                 {
                     "Update": {
                         "TableName": SESSIONS_TABLE,
-                        "Key": serialize_item({"session_id": session_id}),
+                        "Key": {"session_id": session_id},
                         "UpdateExpression": "SET #status = :revoked, revokedAt = :now",
                         "ConditionExpression": (
                             "userId = :user_id "
@@ -489,13 +489,13 @@ def handle_logout(event, body):
                             "#status": "status",
                             "#role": "role",
                         },
-                        "ExpressionAttributeValues": serialize_item({
+                        "ExpressionAttributeValues": {
                             ":revoked": "REVOKED",
                             ":active": "ACTIVE",
                             ":now": now,
                             ":user_id": str(user_id),
                             ":role": role,
-                        }),
+                        },
                     }
                 }
             ]
