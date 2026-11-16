@@ -18,12 +18,14 @@ DB_USER = os.environ["DB_USER"]
 DB_PASSWORD_PARAMETER = os.environ["DB_PASSWORD_PARAMETER"]
 
 ALLOWED_UPDATE_FIELDS = {
-    "type_name",
     "description",
-    "duration_minutes",
     "capacity",
     "consultation_fee",
 }
+
+
+class ConflictError(Exception):
+    pass
 
 
 def response(status, body):
@@ -72,42 +74,76 @@ def get_body(event):
     return data
 
 
-def validate_type(data):
-    name = data.get("type_name")
-    duration = data.get("duration_minutes")
-    capacity = data.get("capacity", 1)
-    fee = data.get("consultation_fee", 0)
-
-    if not isinstance(name, str) or not name.strip():
-        raise ValueError("type_name is required")
-
-    if len(name.strip()) > 100:
-        raise ValueError("type_name cannot exceed 100 characters")
-
-    if duration is None or isinstance(duration, bool):
-        raise ValueError("duration_minutes is required")
+def parse_positive_integer(value, field_name):
+    if value is None or isinstance(value, bool):
+        raise ValueError(f"{field_name} must be a positive integer")
 
     try:
-        duration = int(duration)
-        capacity = int(capacity)
-        fee = Decimal(str(fee))
+        number = Decimal(str(value))
     except (TypeError, ValueError, InvalidOperation):
-        raise ValueError("Invalid duration, capacity or consultation fee")
+        raise ValueError(f"{field_name} must be a positive integer")
 
-    if duration <= 0:
-        raise ValueError("duration_minutes must be greater than zero")
+    if (
+        not number.is_finite()
+        or number != number.to_integral_value()
+        or number <= 0
+    ):
+        raise ValueError(f"{field_name} must be a positive integer")
 
-    if fee < 0 or fee > Decimal("99999999.99"):
+    return int(number)
+
+
+def validate_type(cursor, data):
+    catalogue_id = parse_positive_integer(
+        data.get("catalogue_id"),
+        "catalogue_id",
+    )
+
+    cursor.execute(
+        """
+        SELECT
+            catalogue_id,
+            type_name,
+            duration_minutes,
+            min_capacity,
+            max_capacity
+        FROM consultation_type_catalogue
+        WHERE catalogue_id = %s
+        """,
+        (catalogue_id,),
+    )
+
+    catalogue = cursor.fetchone()
+
+    if not catalogue:
+        raise ValueError("Invalid consultation type catalogue selection")
+
+    capacity = parse_positive_integer(
+        data.get("capacity", catalogue["min_capacity"]),
+        "capacity",
+    )
+
+    if not catalogue["min_capacity"] <= capacity <= catalogue["max_capacity"]:
+        raise ValueError(
+            f'{catalogue["type_name"]} capacity must be between '
+            f'{catalogue["min_capacity"]} and {catalogue["max_capacity"]}'
+        )
+
+    try:
+        fee = Decimal(str(data.get("consultation_fee", 0)))
+    except (TypeError, ValueError, InvalidOperation):
         raise ValueError("Invalid consultation_fee")
 
-    if name.strip() == "Health Camp Session":
-        if not 2 <= capacity <= 10:
-            raise ValueError(
-                "Health Camp Session capacity must be between 2 and 10"
-            )
-    elif capacity != 1:
+    if (
+        not fee.is_finite()
+        or fee < 0
+        or fee > Decimal("99999999.99")
+    ):
+        raise ValueError("Invalid consultation_fee")
+
+    if fee != fee.quantize(Decimal("0.01")):
         raise ValueError(
-            "Only Health Camp Session can have capacity greater than 1"
+            "consultation_fee can have at most 2 decimal places"
         )
 
     description = data.get("description")
@@ -118,9 +154,8 @@ def validate_type(data):
         raise ValueError("description cannot exceed 500 characters")
 
     return {
-        "type_name": name.strip(),
+        "catalogue_id": catalogue_id,
         "description": description,
-        "duration_minutes": duration,
         "capacity": capacity,
         "consultation_fee": fee,
     }
@@ -131,28 +166,52 @@ def list_types(connection, doctor_id):
         cursor.execute(
             """
             SELECT
-                consultation_type_id,
-                type_name,
-                description,
-                duration_minutes,
-                capacity,
-                consultation_fee,
-                status,
-                created_at,
-                updated_at
-            FROM consultation_types
-            WHERE doctor_id = %s
-            ORDER BY created_at DESC
+                ct.consultation_type_id,
+                ct.doctor_id,
+                ct.catalogue_id,
+                catalogue.type_name,
+                ct.description,
+                catalogue.duration_minutes,
+                catalogue.min_capacity,
+                catalogue.max_capacity,
+                ct.capacity,
+                ct.consultation_fee,
+                ct.status,
+                ct.created_at,
+                ct.updated_at
+            FROM consultation_types ct
+            INNER JOIN consultation_type_catalogue catalogue
+                ON catalogue.catalogue_id = ct.catalogue_id
+            WHERE ct.doctor_id = %s
+            ORDER BY ct.created_at DESC
             """,
             (doctor_id,),
         )
+
+        return cursor.fetchall()
+
+
+def list_catalogue(connection):
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT
+                catalogue_id,
+                type_name,
+                duration_minutes,
+                min_capacity,
+                max_capacity
+            FROM consultation_type_catalogue
+            ORDER BY catalogue_id
+            """
+        )
+
         return cursor.fetchall()
 
 
 def create_type(connection, doctor_id, data):
-    values = validate_type(data)
-
     with connection.cursor() as cursor:
+
         cursor.execute(
             """
             SELECT doctor_id
@@ -167,6 +226,23 @@ def create_type(connection, doctor_id, data):
         if not cursor.fetchone():
             raise LookupError("Active doctor profile not found")
 
+        values = validate_type(cursor, data)
+
+        cursor.execute(
+            """
+            SELECT consultation_type_id
+            FROM consultation_types
+            WHERE doctor_id = %s
+              AND catalogue_id = %s
+            """,
+            (doctor_id, values["catalogue_id"]),
+        )
+
+        if cursor.fetchone():
+            raise ConflictError(
+                "You have already added this consultation type"
+            )
+
         cursor.execute(
             """
             SELECT COUNT(*) AS type_count
@@ -175,25 +251,24 @@ def create_type(connection, doctor_id, data):
             """,
             (doctor_id,),
         )
+
         is_first_type = cursor.fetchone()["type_count"] == 0
 
         cursor.execute(
             """
             INSERT INTO consultation_types (
                 doctor_id,
-                type_name,
+                catalogue_id,
                 description,
-                duration_minutes,
                 capacity,
                 consultation_fee
             )
-            VALUES (%s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s)
             """,
             (
                 doctor_id,
-                values["type_name"],
+                values["catalogue_id"],
                 values["description"],
-                values["duration_minutes"],
                 values["capacity"],
                 values["consultation_fee"],
             ),
@@ -240,9 +315,8 @@ def update_type(connection, doctor_id, type_id, data):
         cursor.execute(
             """
             SELECT
-                type_name,
+                catalogue_id,
                 description,
-                duration_minutes,
                 capacity,
                 consultation_fee
             FROM consultation_types
@@ -259,23 +333,19 @@ def update_type(connection, doctor_id, type_id, data):
             raise LookupError("Consultation type not found")
 
         merged = {**existing, **data}
-        values = validate_type(merged)
+        values = validate_type(cursor, merged)
 
         cursor.execute(
             """
             UPDATE consultation_types
-            SET type_name = %s,
-                description = %s,
-                duration_minutes = %s,
+            SET description = %s,
                 capacity = %s,
                 consultation_fee = %s
             WHERE consultation_type_id = %s
               AND doctor_id = %s
             """,
             (
-                values["type_name"],
                 values["description"],
-                values["duration_minutes"],
                 values["capacity"],
                 values["consultation_fee"],
                 type_id,
@@ -331,7 +401,15 @@ def handler(event, context):
 
         if method == "GET":
             result = list_types(connection, doctor_id)
-            return response(200, {"consultation_types": result})
+            catalogue = list_catalogue(connection)
+
+            return response(
+                200,
+                {
+                    "consultation_types": result,
+                    "catalogue": catalogue,
+                },
+            )
 
         data = get_body(event)
 
@@ -372,6 +450,11 @@ def handler(event, context):
         if connection:
             connection.rollback()
         return response(400, {"message": str(exc)})
+
+    except ConflictError as exc:
+        if connection:
+            connection.rollback()
+        return response(409, {"message": str(exc)})
 
     except LookupError as exc:
         if connection:

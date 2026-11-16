@@ -131,8 +131,8 @@ def handler(event, context):
                 SELECT
                     s.slot_id,
                     s.consultation_type_id,
-                    ct.type_name AS consultation_type,
-                    ct.duration_minutes,
+                    catalogue.type_name AS consultation_type,
+                    catalogue.duration_minutes,
                     s.start_at,
                     s.end_at,
                     s.capacity,
@@ -148,8 +148,10 @@ def handler(event, context):
                     p.email AS patient_email
                 FROM slots s
                 JOIN consultation_types ct
-                  ON ct.consultation_type_id = s.consultation_type_id
-                 AND ct.doctor_id = s.doctor_id
+                    ON ct.consultation_type_id = s.consultation_type_id
+                    AND ct.doctor_id = s.doctor_id
+                JOIN consultation_type_catalogue catalogue
+                    ON catalogue.catalogue_id = ct.catalogue_id
                 LEFT JOIN appointments a
                   ON a.slot_id = s.slot_id
                  AND a.status = 'CONFIRMED'

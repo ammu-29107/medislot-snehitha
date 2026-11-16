@@ -1,3 +1,4 @@
+
 {% extends "base.html" %}
 {% block title %}Consultation Types | MediSlot{% endblock %}
 {% set active_page = 'consultation_types' %}
@@ -16,46 +17,115 @@
 
         <section class="page-content">
             {% include "_flash_messages.html" %}
+
             <div class="welcome-section">
                 <div>
                     <p class="eyebrow">YOUR SERVICES</p>
                     <h1>Consultation types</h1>
-                    <p class="muted">Set up the services patients can book, including duration, capacity and consultation fee.</p>
+                    <p class="muted">
+                        Configure the services patients can book, including capacity and consultation fee.
+                    </p>
                 </div>
-                <span class="count-chip">{{ consultation_types|selectattr('status', 'equalto', 'ACTIVE')|list|length }} active service(s)</span>
+                <span class="count-chip">
+                    {{ consultation_types|selectattr('status', 'equalto', 'ACTIVE')|list|length }}
+                    active service(s)
+                </span>
             </div>
 
             <section class="panel consultation-create-panel">
                 <div class="panel-heading">
                     <div>
                         <h3>Add a consultation type</h3>
-                        <p class="muted">Create a service that patients can choose when booking an appointment.</p>
+                        <p class="muted">
+                            Choose from the fixed MediSlot consultation catalogue.
+                        </p>
                     </div>
                 </div>
-                <form method="POST" action="{{ url_for('consultation_types') }}" class="form-grid">
+
+                {% set selected_catalogue_ids =
+                    consultation_types | map(attribute='catalogue_id') | list
+                %}
+
+                <form method="POST"
+                      action="{{ url_for('consultation_types') }}"
+                      class="form-grid">
+
                     <div class="form-group">
-                        <label for="new-type-name">Consultation name</label>
-                        <input id="new-type-name" name="type_name" maxlength="100" placeholder="e.g. General Consultation" required>
+                        <label for="new-catalogue-id">Consultation type</label>
+
+                        <select id="new-catalogue-id"
+                                name="catalogue_id"
+                                required>
+                            <option value="">Select a consultation type</option>
+
+                            {% for option in catalogue_types %}
+                                <option
+                                    value="{{ option.catalogue_id }}"
+                                    data-min-capacity="{{ option.min_capacity }}"
+                                    data-max-capacity="{{ option.max_capacity }}"
+                                    {% if option.catalogue_id in selected_catalogue_ids %}
+                                        disabled
+                                    {% endif %}
+                                >
+                                    {{ option.type_name }}
+                                    ({{ option.duration_minutes }} min)
+                                    {% if option.catalogue_id in selected_catalogue_ids %}
+                                        — Already added
+                                    {% endif %}
+                                </option>
+                            {% endfor %}
+                        </select>
+
+                        <small class="form-help">
+                            Consultation names and durations are fixed by the catalogue.
+                        </small>
                     </div>
-                    <div class="form-group">
-                        <label for="new-type-duration">Duration (minutes)</label>
-                        <input id="new-type-duration" type="number" name="duration_minutes" min="1" max="1440" placeholder="30" required>
-                    </div>
+
                     <div class="form-group">
                         <label for="new-type-capacity">Capacity</label>
-                        <input id="new-type-capacity" type="number" name="capacity" min="1" max="10" value="1" required>
-                        <small class="form-help">Only Health Camp Session supports capacity above 1 (maximum 10).</small>
+                        <input
+                            id="new-type-capacity"
+                            type="number"
+                            name="capacity"
+                            min="1"
+                            max="10"
+                            value="1"
+                            required
+                        >
+                        <small class="form-help">
+                            Regular consultations support capacity 1.
+                            Health Camp Session supports 2–10.
+                        </small>
                     </div>
+
                     <div class="form-group">
                         <label for="new-type-fee">Consultation fee (₹)</label>
-                        <input id="new-type-fee" type="number" name="consultation_fee" min="0" step="0.01" value="0" required>
+                        <input
+                            id="new-type-fee"
+                            type="number"
+                            name="consultation_fee"
+                            min="0"
+                            step="0.01"
+                            value="0"
+                            required
+                        >
                     </div>
+
                     <div class="form-group form-group-full">
                         <label for="new-type-description">Description</label>
-                        <textarea id="new-type-description" name="description" rows="3" maxlength="500" placeholder="Briefly describe this consultation service."></textarea>
+                        <textarea
+                            id="new-type-description"
+                            name="description"
+                            rows="3"
+                            maxlength="500"
+                            placeholder="Briefly describe this consultation service."
+                        ></textarea>
                     </div>
+
                     <div class="form-actions form-actions-wide">
-                        <button type="submit" class="btn btn-primary">Add consultation type</button>
+                        <button type="submit" class="btn btn-primary">
+                            Add consultation type
+                        </button>
                     </div>
                 </form>
             </section>
@@ -64,9 +134,13 @@
                 <div class="panel-heading">
                     <div>
                         <h3>Saved consultation types</h3>
-                        <p class="muted">Select any row to expand its details and edit or disable the service.</p>
+                        <p class="muted">
+                            Select any row to expand its details and edit or disable the service.
+                        </p>
                     </div>
-                    <span class="count-chip">{{ consultation_types|length }} total</span>
+                    <span class="count-chip">
+                        {{ consultation_types|length }} total
+                    </span>
                 </div>
 
                 {% if consultation_types %}
@@ -79,9 +153,12 @@
                                     <th>Capacity</th>
                                     <th>Fee</th>
                                     <th>Status</th>
-                                    <th><span class="visually-hidden">Actions</span></th>
+                                    <th>
+                                        <span class="visually-hidden">Actions</span>
+                                    </th>
                                 </tr>
                             </thead>
+
                             <tbody>
                                 {% for item in consultation_types %}
                                     <tr
@@ -95,57 +172,136 @@
                                     >
                                         <td>
                                             <strong>{{ item.type_name }}</strong>
-                                            <small class="table-secondary">{{ item.description or 'No description provided' }}</small>
+                                            <small class="table-secondary">
+                                                {{ item.description or 'No description provided' }}
+                                            </small>
                                         </td>
+
                                         <td>{{ item.duration_minutes }} min</td>
                                         <td>{{ item.capacity }}</td>
-                                        <td>₹{{ '%.2f'|format(item.consultation_fee|float) }}</td>
-                                        <td><span class="status-badge {{ 'status-active' if item.status == 'ACTIVE' else 'status-inactive' }}">{{ item.status|title }}</span></td>
-                                        <td><span class="table-action" data-consultation-label>Edit</span></td>
+                                        <td>
+                                            ₹{{ '%.2f'|format(item.consultation_fee|float) }}
+                                        </td>
+
+                                        <td>
+                                            <span class="status-badge {{ 'status-active' if item.status == 'ACTIVE' else 'status-inactive' }}">
+                                                {{ item.status|title }}
+                                            </span>
+                                        </td>
+
+                                        <td>
+                                            <span class="table-action" data-consultation-label>
+                                                Edit
+                                            </span>
+                                        </td>
                                     </tr>
-                                    <tr class="consultation-editor-row" id="consultation-edit-{{ item.consultation_type_id }}" hidden>
+
+                                    <tr
+                                        class="consultation-editor-row"
+                                        id="consultation-edit-{{ item.consultation_type_id }}"
+                                        hidden
+                                    >
                                         <td colspan="6">
                                             <div class="consultation-editor">
+
                                                 <div class="consultation-editor-heading">
                                                     <div>
                                                         <span class="eyebrow">EDIT SERVICE</span>
                                                         <h4>{{ item.type_name }}</h4>
+                                                        <p class="muted">
+                                                            {{ item.duration_minutes }} minutes · Fixed catalogue option
+                                                        </p>
                                                     </div>
-                                                    <span class="muted">ID #{{ item.consultation_type_id }}</span>
+
+                                                    <span class="muted">
+                                                        ID #{{ item.consultation_type_id }}
+                                                    </span>
                                                 </div>
-                                                <form method="POST" action="{{ url_for('update_consultation_type', type_id=item.consultation_type_id) }}" class="form-grid">
+
+                                                <form
+                                                    method="POST"
+                                                    action="{{ url_for('update_consultation_type', type_id=item.consultation_type_id) }}"
+                                                    class="form-grid"
+                                                >
+
                                                     <div class="form-group">
-                                                        <label for="type-name-{{ item.consultation_type_id }}">Consultation name</label>
-                                                        <input id="type-name-{{ item.consultation_type_id }}" name="type_name" value="{{ item.type_name }}" maxlength="100" required>
+                                                        <label for="type-capacity-{{ item.consultation_type_id }}">
+                                                            Capacity
+                                                        </label>
+
+                                                        <input
+                                                            id="type-capacity-{{ item.consultation_type_id }}"
+                                                            type="number"
+                                                            name="capacity"
+                                                            value="{{ item.capacity }}"
+                                                            min="{{ item.min_capacity }}"
+                                                            max="{{ item.max_capacity }}"
+                                                            required
+                                                        >
                                                     </div>
+
                                                     <div class="form-group">
-                                                        <label for="type-duration-{{ item.consultation_type_id }}">Duration (minutes)</label>
-                                                        <input id="type-duration-{{ item.consultation_type_id }}" type="number" name="duration_minutes" value="{{ item.duration_minutes }}" min="1" max="1440" required>
+                                                        <label for="type-fee-{{ item.consultation_type_id }}">
+                                                            Consultation fee (₹)
+                                                        </label>
+
+                                                        <input
+                                                            id="type-fee-{{ item.consultation_type_id }}"
+                                                            type="number"
+                                                            name="consultation_fee"
+                                                            value="{{ item.consultation_fee }}"
+                                                            min="0"
+                                                            step="0.01"
+                                                            required
+                                                        >
                                                     </div>
-                                                    <div class="form-group">
-                                                        <label for="type-capacity-{{ item.consultation_type_id }}">Capacity</label>
-                                                        <input id="type-capacity-{{ item.consultation_type_id }}" type="number" name="capacity" value="{{ item.capacity }}" min="1" max="10" required>
-                                                    </div>
-                                                    <div class="form-group">
-                                                        <label for="type-fee-{{ item.consultation_type_id }}">Consultation fee (₹)</label>
-                                                        <input id="type-fee-{{ item.consultation_type_id }}" type="number" name="consultation_fee" value="{{ item.consultation_fee }}" min="0" step="0.01" required>
-                                                    </div>
+
                                                     <div class="form-group form-group-full">
-                                                        <label for="type-description-{{ item.consultation_type_id }}">Description</label>
-                                                        <textarea id="type-description-{{ item.consultation_type_id }}" name="description" rows="3" maxlength="500">{{ item.description or '' }}</textarea>
+                                                        <label for="type-description-{{ item.consultation_type_id }}">
+                                                            Description
+                                                        </label>
+
+                                                        <textarea
+                                                            id="type-description-{{ item.consultation_type_id }}"
+                                                            name="description"
+                                                            rows="3"
+                                                            maxlength="500"
+                                                        >{{ item.description or '' }}</textarea>
                                                     </div>
+
                                                     <div class="form-actions form-actions-wide">
-                                                        <button type="submit" class="btn btn-primary">Save changes</button>
-                                                        <button type="button" class="btn btn-secondary" data-consultation-close>Close</button>
+                                                        <button type="submit" class="btn btn-primary">
+                                                            Save changes
+                                                        </button>
+
+                                                        <button
+                                                            type="button"
+                                                            class="btn btn-secondary"
+                                                            data-consultation-close
+                                                        >
+                                                            Close
+                                                        </button>
                                                     </div>
                                                 </form>
+
                                                 {% if item.status == 'ACTIVE' %}
-                                                    <form method="POST" action="{{ url_for('disable_consultation_type', type_id=item.consultation_type_id) }}" class="disable-type-form" data-confirm="Disable this consultation type? Existing appointments and historical records will be retained.">
-                                                        <button type="submit" class="btn btn-danger">Disable consultation type</button>
+                                                    <form
+                                                        method="POST"
+                                                        action="{{ url_for('disable_consultation_type', type_id=item.consultation_type_id) }}"
+                                                        class="disable-type-form"
+                                                        data-confirm="Disable this consultation type? Existing appointments and historical records will be retained."
+                                                    >
+                                                        <button type="submit" class="btn btn-danger">
+                                                            Disable consultation type
+                                                        </button>
                                                     </form>
                                                 {% else %}
-                                                    <p class="inline-notice">This consultation type is disabled. It cannot be selected for new availability or slots.</p>
+                                                    <p class="inline-notice">
+                                                        This consultation type is disabled.
+                                                        It cannot be selected for new availability or slots.
+                                                    </p>
                                                 {% endif %}
+
                                             </div>
                                         </td>
                                     </tr>
@@ -153,6 +309,7 @@
                             </tbody>
                         </table>
                     </div>
+
                 {% else %}
                     <div class="empty-state compact-empty">
                         <h4>No consultation types yet</h4>
@@ -163,4 +320,38 @@
         </section>
     </main>
 </div>
+
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+    const catalogueSelect = document.getElementById("new-catalogue-id");
+    const capacityInput = document.getElementById("new-type-capacity");
+
+    if (!catalogueSelect || !capacityInput) {
+        return;
+    }
+
+    function updateCapacityLimits() {
+        const option = catalogueSelect.selectedOptions[0];
+
+        const min = Number(option?.dataset.minCapacity || 1);
+        const max = Number(option?.dataset.maxCapacity || 10);
+
+        capacityInput.min = String(min);
+        capacityInput.max = String(max);
+
+        const current = Number(capacityInput.value);
+
+        if (
+            !Number.isFinite(current) ||
+            current < min ||
+            current > max
+        ) {
+            capacityInput.value = String(min);
+        }
+    }
+
+    catalogueSelect.addEventListener("change", updateCapacityLimits);
+    updateCapacityLimits();
+});
+</script>
 {% endblock %}

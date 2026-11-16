@@ -14,6 +14,7 @@ import bcrypt
 import jwt
 import pymysql
 from botocore.exceptions import BotoCoreError, ClientError
+from boto3.dynamodb.types import TypeSerializer
 
 
 logger = logging.getLogger()
@@ -33,6 +34,14 @@ JWT_AUDIENCE = os.environ["JWT_AUDIENCE"]
 
 REFRESH_TOKENS_TABLE = os.environ["REFRESH_TOKENS_TABLE"]
 SESSIONS_TABLE = os.environ["SESSIONS_TABLE"]
+dynamodb_serializer = TypeSerializer()
+
+
+def serialize_item(item):
+    return {
+        key: dynamodb_serializer.serialize(value)
+        for key, value in item.items()
+    }
 
 ACCESS_TOKEN_TTL_SECONDS = int(
     os.getenv("ACCESS_TOKEN_TTL_SECONDS", "900")
@@ -200,15 +209,6 @@ def handle_login(event, body, correlation_id):
         refresh_token_hash = hashlib.sha256(
             refresh_token.encode("utf-8")
         ).hexdigest()
-
-        logger.info(
-            "Login transaction types: user_id=%s, access_jti=%s, "
-            "refresh_token_hash=%s, session_id=%s",
-            type(user_id).__name__,
-            type(access_jti).__name__,
-            type(refresh_token_hash).__name__,
-            type(session_id).__name__,
-        )
 
         transaction_items = [
             {

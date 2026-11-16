@@ -8,6 +8,7 @@ import boto3
 import pymysql
 
 from botocore.exceptions import ClientError
+from decimal import Decimal, InvalidOperation
 
 logger = logging.getLogger()
 logger.setLevel(os.getenv("LOG_LEVEL", "INFO"))
@@ -46,6 +47,24 @@ def response(status_code, body):
         "body": json.dumps(body, default=str),
     }
 
+
+def parse_positive_integer(value, field_name):
+    if value is None or isinstance(value, bool):
+        raise ValueError(f"Invalid {field_name}")
+
+    try:
+        number = Decimal(str(value))
+    except (TypeError, ValueError, InvalidOperation):
+        raise ValueError(f"Invalid {field_name}")
+
+    if (
+        not number.is_finite()
+        or number != number.to_integral_value()
+        or number <= 0
+    ):
+        raise ValueError(f"Invalid {field_name}")
+
+    return int(number)
 
 def get_db_connection():
     password = ssm.get_parameter(
@@ -174,6 +193,30 @@ def update_profile(connection, doctor_id, data):
         raise ValueError("No valid profile fields supplied")
 
     with connection.cursor() as cursor:
+        if "hospital_id" in updates:
+            try:
+                hospital_id = parse_positive_integer(
+                    updates["hospital_id"],
+                    "hospital_id",
+                )
+            except (TypeError, ValueError):
+                raise ValueError("Invalid hospital_id")
+
+            cursor.execute(
+                """
+                SELECT hospital_id
+                FROM hospitals
+                WHERE hospital_id = %s
+                  AND status = 'ACTIVE'
+                """,
+                (hospital_id,),
+            )
+
+            if not cursor.fetchone():
+                raise ValueError("Selected hospital is not active")
+
+            updates["hospital_id"] = hospital_id
+
         if updates:
             assignments = ", ".join(
                 f"`{column}` = %s" for column in updates
@@ -246,6 +289,20 @@ def update_profile(connection, doctor_id, data):
 def generate_photo_upload_url(doctor_id, data):
     content_type = data.get("content_type")
 
+    try:
+        if "content_length" not in data:
+            raise ValueError("content_length is required")
+
+        content_length = parse_positive_integer(
+            data["content_length"],
+            "content_length",
+        )
+    except (KeyError, TypeError, ValueError):
+        raise ValueError("content_length is required")
+
+    if not 0 < content_length <= 5 * 1024 * 1024:
+        raise ValueError("Profile photo must be 5 MB or smaller")
+
     if content_type not in ALLOWED_PHOTO_TYPES:
         raise ValueError("Only JPEG, PNG and WEBP images are allowed")
 
@@ -260,6 +317,7 @@ def generate_photo_upload_url(doctor_id, data):
             "Bucket": PRIVATE_FILES_BUCKET,
             "Key": photo_key,
             "ContentType": content_type,
+            "ContentLength": content_length,
         },
         ExpiresIn=300,
     )
