@@ -1,0 +1,167 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: MediSlot patient profile, doctor discovery and slot availability APIs
+
+Parameters:
+  ProjectName:
+    Type: String
+  Environment:
+    Type: String
+  NetworkStackName:
+    Type: String
+  ArtifactsBucketName:
+    Type: String
+  DatabaseHost:
+    Type: String
+  DatabaseUsername:
+    Type: String
+  PatientPortalCodeKey:
+    Type: String
+
+Resources:
+  PatientPortalExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectName}-${Environment}-patient-portal-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole'
+      Policies:
+        - PolicyName: PatientPortalDatabaseAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: ssm:GetParameter
+                Resource: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${ProjectName}/${Environment}/database/password'
+
+  PatientPortalFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${ProjectName}-${Environment}-patient-portal'
+      Runtime: python3.12
+      Handler: app.handler
+      Role: !GetAtt PatientPortalExecutionRole.Arn
+      Timeout: 20
+      MemorySize: 256
+      Code:
+        S3Bucket: !Ref ArtifactsBucketName
+        S3Key: !Ref PatientPortalCodeKey
+      VpcConfig:
+        SecurityGroupIds:
+          - Fn::ImportValue:
+              Fn::Sub: '${NetworkStackName}-LambdaSecurityGroupId'
+        SubnetIds:
+          - Fn::ImportValue:
+              Fn::Sub: '${NetworkStackName}-PrivateSubnetAId'
+          - Fn::ImportValue:
+              Fn::Sub: '${NetworkStackName}-PrivateSubnetBId'
+      Environment:
+        Variables:
+          DB_HOST: !Ref DatabaseHost
+          DB_PORT: '3306'
+          DB_NAME: medislot
+          DB_USER: !Ref DatabaseUsername
+          DB_PASSWORD_PARAMETER: !Sub '/${ProjectName}/${Environment}/database/password'
+          LOG_LEVEL: INFO
+
+  PatientPortalIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId:
+        Fn::ImportValue:
+          Fn::Sub: '${ProjectName}-${Environment}-AuthApiId'
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt PatientPortalFunction.Arn
+      PayloadFormatVersion: '2.0'
+      TimeoutInMillis: 29000
+
+  PatientPortalInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref PatientPortalFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub
+        - 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiId}/*/*'
+        - ApiId:
+            Fn::ImportValue:
+              Fn::Sub: '${ProjectName}-${Environment}-AuthApiId'
+
+  PatientProfileGetRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId:
+        Fn::ImportValue:
+          Fn::Sub: '${ProjectName}-${Environment}-AuthApiId'
+      RouteKey: 'GET /patient/profile'
+      AuthorizationType: CUSTOM
+      AuthorizerId:
+        Fn::ImportValue:
+          Fn::Sub: '${ProjectName}-${Environment}-AuthAuthorizerId'
+      Target: !Sub 'integrations/${PatientPortalIntegration}'
+
+  PatientProfilePutRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId:
+        Fn::ImportValue:
+          Fn::Sub: '${ProjectName}-${Environment}-AuthApiId'
+      RouteKey: 'PUT /patient/profile'
+      AuthorizationType: CUSTOM
+      AuthorizerId:
+        Fn::ImportValue:
+          Fn::Sub: '${ProjectName}-${Environment}-AuthAuthorizerId'
+      Target: !Sub 'integrations/${PatientPortalIntegration}'
+
+  PatientProfileDeleteRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId:
+        Fn::ImportValue:
+          Fn::Sub: '${ProjectName}-${Environment}-AuthApiId'
+      RouteKey: 'DELETE /patient/profile'
+      AuthorizationType: CUSTOM
+      AuthorizerId:
+        Fn::ImportValue:
+          Fn::Sub: '${ProjectName}-${Environment}-AuthAuthorizerId'
+      Target: !Sub 'integrations/${PatientPortalIntegration}'
+
+  DoctorSearchRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId:
+        Fn::ImportValue:
+          Fn::Sub: '${ProjectName}-${Environment}-AuthApiId'
+      RouteKey: 'GET /doctors'
+      AuthorizationType: NONE
+      Target: !Sub 'integrations/${PatientPortalIntegration}'
+
+  PublicDoctorProfileRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId:
+        Fn::ImportValue:
+          Fn::Sub: '${ProjectName}-${Environment}-AuthApiId'
+      RouteKey: 'GET /doctors/{doctorId}'
+      AuthorizationType: NONE
+      Target: !Sub 'integrations/${PatientPortalIntegration}'
+
+  DoctorSlotAvailabilityRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId:
+        Fn::ImportValue:
+          Fn::Sub: '${ProjectName}-${Environment}-AuthApiId'
+      RouteKey: 'GET /doctors/{doctorId}/slots'
+      AuthorizationType: NONE
+      Target: !Sub 'integrations/${PatientPortalIntegration}'
+
+Outputs:
+  PatientPortalFunctionName:
+    Value: !Ref PatientPortalFunction

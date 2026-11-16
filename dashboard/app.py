@@ -404,6 +404,13 @@ def register(role):
             "dateOfBirth": request.form.get("dateOfBirth", "").strip(),
             "phoneNumber": request.form.get("phoneNumber", "").strip(),
             "gender": request.form.get("gender", "").strip(),
+            "city": request.form.get("city", "").strip(),
+            "emergencyContactName": request.form.get(
+                "emergencyContactName", ""
+            ).strip(),
+            "emergencyContactPhone": request.form.get(
+                "emergencyContactPhone", ""
+            ).strip(),
         })
         if not all(payload[key] for key in ("dateOfBirth", "phoneNumber", "gender")):
             flash("Please complete your date of birth, phone number and gender.", "error")
@@ -429,17 +436,78 @@ def register(role):
 @app.route("/patient/dashboard")
 @patient_required
 def patient_dashboard():
-    profile_data, profile_status = call_doctor_api("GET", "/profile")
-    if profile_status == 200:
-        profile = profile_data.get("profile", {})
-    else:
-        profile = {}
-        flash(
-            profile_data.get("message", "Unable to load your patient profile."),
-            "error",
-        )
+    profile_data, profile_status = call_doctor_api("GET", "/patient/profile")
+    profile = profile_data.get("profile", {}) if profile_status == 200 else {}
+    if profile_status != 200:
+        flash(profile_data.get("message", "Unable to load your patient profile."), "error")
+    return render_template("patient_dashboard.html", profile=profile, active_page="patient_dashboard")
 
-    return render_template("patient_dashboard.html", profile=profile)
+
+@app.route("/patient/profile", methods=["GET", "POST"])
+@patient_required
+def patient_profile():
+    if request.method == "POST":
+        payload = {
+            "full_name": request.form.get("full_name", "").strip(),
+            "phone_number": request.form.get("phone_number", "").strip(),
+            "gender": request.form.get("gender", "").strip(),
+            "city": request.form.get("city", "").strip(),
+            "emergency_contact_name": request.form.get("emergency_contact_name", "").strip(),
+            "emergency_contact_phone": request.form.get("emergency_contact_phone", "").strip(),
+        }
+        data, status = call_doctor_api("PUT", "/patient/profile", json=payload)
+        if status == 200:
+            flash("Your profile was updated.", "success")
+            return redirect(url_for("patient_profile"))
+        flash(data.get("message", "Unable to update your profile."), "error")
+
+    data, status = call_doctor_api("GET", "/patient/profile")
+    if status != 200:
+        flash(data.get("message", "Unable to load your profile."), "error")
+        return redirect(url_for("patient_dashboard"))
+    return render_template("patient_profile.html", profile=data.get("profile", {}), active_page="patient_profile")
+
+
+@app.route("/doctors")
+@patient_required
+def doctor_search():
+    filters = {
+        "name": request.args.get("name", "").strip(),
+        "hospital": request.args.get("hospital", "").strip(),
+        "speciality": request.args.get("speciality", "").strip(),
+        "city": request.args.get("city", "").strip(),
+        "page": request.args.get("page", "1"),
+        "page_size": "10",
+    }
+    data, status = call_doctor_api("GET", "/doctors", params=filters)
+    if status != 200:
+        flash(data.get("message", "Unable to search doctors."), "error")
+        data = {"doctors": [], "pagination": {"page": 1, "total_pages": 0}}
+    return render_template("doctor_search.html", doctors=data.get("doctors", []),
+                           pagination=data.get("pagination", {}), filters=filters,
+                           active_page="doctor_search")
+
+
+@app.route("/doctors/<int:doctor_id>")
+@patient_required
+def doctor_detail(doctor_id):
+    data, status = call_doctor_api("GET", f"/doctors/{doctor_id}")
+    if status != 200:
+        flash(data.get("message", "Unable to load doctor profile."), "error")
+        return redirect(url_for("doctor_search"))
+    doctor = data.get("doctor", {})
+    start_date = request.args.get("start_date", date.today().isoformat())
+    end_date = request.args.get("end_date", (date.today() + timedelta(days=30)).isoformat())
+    params = {"start_date": start_date, "end_date": end_date}
+    if request.args.get("consultation_type_id"):
+        params["consultation_type_id"] = request.args["consultation_type_id"]
+    slots_data, slots_status = call_doctor_api("GET", f"/doctors/{doctor_id}/slots", params=params)
+    slots = slots_data.get("slots", []) if slots_status == 200 else []
+    if slots_status != 200:
+        flash(slots_data.get("message", "Unable to load slot availability."), "error")
+    return render_template("doctor_detail.html", doctor=doctor, slots=slots,
+                           start_date=start_date, end_date=end_date,
+                           active_page="doctor_search")
 
 
 @app.route("/dashboard")

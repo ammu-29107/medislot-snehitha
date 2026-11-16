@@ -2147,3 +2147,41 @@ input:disabled {
 .auth-form .password-toggle:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; border-radius: 4px; }
 .auth-form .password-match-message.is-match { color: #16804a; }
 .auth-form .password-match-message.is-error { color: #c0392b; }
+
+
+/* Patient portal */
+.portal-shell.patient-portal{min-height:100vh;background:var(--page-bg,#f5f7fb);color:var(--text,#172033)}
+.portal-topbar{min-height:72px;padding:0 clamp(20px,5vw,72px);display:flex;align-items:center;justify-content:space-between;gap:24px;background:var(--surface,#fff);border-bottom:1px solid var(--border,#e6eaf0)}
+.portal-topbar nav{display:flex;align-items:center;gap:24px;flex-wrap:wrap}
+.portal-topbar nav a{color:var(--text,#172033);text-decoration:none;font-weight:600;font-size:.92rem}
+.portal-main{width:min(1120px,calc(100% - 40px));margin:0 auto;padding:42px 0 72px}
+.narrow-main{width:min(820px,calc(100% - 40px))}
+.portal-welcome,.page-heading{margin-bottom:28px}
+.portal-welcome h1,.page-heading h1{font-size:clamp(2rem,4vw,2.8rem);margin:6px 0 10px}
+.portal-welcome p,.page-heading p{color:var(--muted,#64748b)}
+.eyebrow{font-size:.72rem;letter-spacing:.13em;font-weight:700;color:var(--primary,#3974d6);margin:0 0 8px}
+.patient-summary-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;margin:26px 0}
+.patient-summary-card,.portal-panel,.doctor-result-card{background:var(--surface,#fff);border:1px solid var(--border,#e6eaf0);border-radius:18px;padding:24px;box-shadow:0 8px 28px rgba(20,35,60,.045)}
+.patient-summary-card h2{margin:12px 0 8px}.patient-summary-card p{color:var(--muted,#64748b);min-height:44px}
+.summary-icon{font-size:1.5rem;color:var(--primary,#3974d6)}
+.panel-heading,.results-heading{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:20px}
+.panel-heading h2,.results-heading h2{margin:0}
+.patient-overview-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px}
+.patient-overview-grid div{display:grid;gap:5px}.patient-overview-grid span,.doctor-result-content p{color:var(--muted,#64748b);font-size:.9rem}
+.patient-profile-form .form-grid{margin-bottom:24px}
+.search-filter-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;align-items:end;margin-bottom:28px}
+.search-filter-grid .form-group{margin:0}.filter-actions{display:flex;gap:8px;grid-column:1/-1}
+.doctor-result-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.doctor-result-card{display:flex;gap:16px}
+.doctor-avatar{width:52px;height:52px;flex:0 0 52px;border-radius:50%;display:grid;place-items:center;background:#eaf1ff;color:#2859ad;font-weight:800}
+.doctor-result-content h3{margin:0 0 6px}.doctor-result-content p{margin:5px 0}.doctor-result-content .doctor-speciality{font-weight:700;color:var(--primary,#3974d6)}
+.muted{color:var(--muted,#64748b)}
+.pagination{display:flex;align-items:center;justify-content:center;gap:20px;margin-top:28px}
+.empty-state{text-align:center;padding:44px 20px;background:var(--surface,#fff);border:1px dashed var(--border,#d7deea);border-radius:16px}
+.doctor-profile-panel{margin:22px 0}.doctor-profile-panel h1{margin:4px 0 10px}.doctor-profile-panel h3{margin:24px 0 8px}
+.tag-list{display:flex;gap:8px;flex-wrap:wrap}.tag-list span{background:#edf3ff;color:#2859ad;padding:6px 10px;border-radius:999px;font-size:.84rem}
+.consultation-list{display:grid;gap:12px}.consultation-list>div{padding:14px 0;border-bottom:1px solid var(--border,#e6eaf0);display:grid;gap:5px}.consultation-list span{color:var(--muted,#64748b)}.consultation-list p{margin:0}
+.slot-date-filter{display:flex;align-items:end;gap:14px;flex-wrap:wrap;margin:18px 0 24px}.slot-date-filter label{display:grid;gap:6px;font-size:.88rem;font-weight:600}.slot-date-filter input{padding:10px;border:1px solid var(--border,#d7deea);border-radius:9px;background:var(--surface,#fff);color:inherit}
+.slot-availability-list{display:grid;gap:10px}.slot-availability-item{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px;border:1px solid var(--border,#e6eaf0);border-radius:12px}.slot-availability-item>div:first-child{display:grid;gap:4px}.slot-availability-item span{color:var(--muted,#64748b);font-size:.88rem}.slot-seat-count{font-weight:700;color:#16834b}
+@media(max-width:800px){.search-filter-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.doctor-result-grid{grid-template-columns:1fr}}
+@media(max-width:600px){.portal-topbar{align-items:flex-start;flex-direction:column;padding:16px 20px}.portal-topbar nav{gap:14px}.portal-main{padding-top:28px}.patient-summary-grid,.patient-overview-grid,.search-filter-grid{grid-template-columns:1fr}.slot-availability-item{align-items:flex-start;flex-direction:column}}

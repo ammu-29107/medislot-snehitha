@@ -4,7 +4,11 @@
 
 DynamoDB stores operational data that benefits from predictable key-based access, conditional writes, TTL-assisted cleanup, and high-concurrency coordination. RDS remains the durable relational store for core business records.
 
-## 2. `SlotInventoryTable`
+## 2. Slot inventory boundary
+
+For the current Milestone 4 implementation, generated doctor slots and their capacity counters are stored in the RDS MySQL `slots` table. The patient discovery API reads that table. Do not provision or use a parallel `SlotInventoryTable` for this implementation. The remaining DynamoDB designs below describe operational coordination patterns planned for later workflows.
+
+## 2. `SlotInventoryTable` (not deployed for current Milestone 4)
 
 **Purpose:** Materialised appointment slots and atomic capacity accounting.
 
