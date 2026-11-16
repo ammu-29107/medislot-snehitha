@@ -29,7 +29,7 @@ def response(status, payload):
 
 def _connection():
     password = ssm.get_parameter(
-        Name=DB_PASSWORD_PARAMETER, WithDecryption=True
+        Name=DB_PASSWORD_PARAMETER, WithDecryption=True  # gitleaks:allow
     )["Parameter"]["Value"]
     return pymysql.connect(
         host=DB_HOST, port=DB_PORT, user=DB_USER, password=password,
