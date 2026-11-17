@@ -2185,3 +2185,227 @@ input:disabled {
 .slot-availability-list{display:grid;gap:10px}.slot-availability-item{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px;border:1px solid var(--border,#e6eaf0);border-radius:12px}.slot-availability-item>div:first-child{display:grid;gap:4px}.slot-availability-item span{color:var(--muted,#64748b);font-size:.88rem}.slot-seat-count{font-weight:700;color:#16834b}
 @media(max-width:800px){.search-filter-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.doctor-result-grid{grid-template-columns:1fr}}
 @media(max-width:600px){.portal-topbar{align-items:flex-start;flex-direction:column;padding:16px 20px}.portal-topbar nav{gap:14px}.portal-main{padding-top:28px}.patient-summary-grid,.patient-overview-grid,.search-filter-grid{grid-template-columns:1fr}.slot-availability-item{align-items:flex-start;flex-direction:column}}
+
+
+/* ==================================================
+   PATIENT PORTAL — SHARED DOCTOR DASHBOARD LAYOUT
+   ================================================== */
+
+.patient-app-layout {
+    min-height: 100vh;
+}
+
+.patient-page-content {
+    min-width: 0;
+}
+
+.patient-page-content .panel {
+    min-width: 0;
+}
+
+.patient-page-content .welcome-section h1 {
+    line-height: 1.3;
+}
+
+.patient-page-content .welcome-section > div:first-child {
+    max-width: 760px;
+}
+
+.patient-stat-value {
+    font-size: 20px !important;
+    overflow-wrap: anywhere;
+}
+
+.patient-overview-grid {
+    margin-top: 5px;
+}
+
+.patient-overview-grid > div {
+    min-width: 0;
+    padding: 13px;
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    background: var(--background);
+}
+
+.patient-overview-grid span {
+    color: var(--muted);
+    font-size: 11px;
+}
+
+.patient-overview-grid strong {
+    overflow-wrap: anywhere;
+    font-size: 13px;
+}
+
+.patient-profile-panel {
+    max-width: 100%;
+}
+
+.patient-form-section {
+    margin: 28px 0 18px;
+    padding-top: 22px;
+    border-top: 1px solid var(--border);
+}
+
+.patient-form-section h3 {
+    margin-bottom: 6px;
+    font-size: 15px;
+}
+
+.patient-form-section p {
+    margin: 0;
+}
+
+.patient-search-panel {
+    margin-bottom: 27px;
+}
+
+.patient-search-panel .search-filter-grid {
+    margin-bottom: 0;
+}
+
+.patient-results-heading {
+    margin: 0 0 18px;
+}
+
+.patient-results-heading h2 {
+    font-size: 17px;
+    margin-bottom: 5px;
+}
+
+.patient-results-heading p {
+    font-size: 11px;
+}
+
+.patient-page-content .doctor-result-card {
+    background: var(--white);
+    border: 1px solid var(--border);
+    border-radius: 13px;
+    box-shadow: var(--shadow);
+    padding: 20px;
+}
+
+.patient-page-content .doctor-result-content {
+    min-width: 0;
+}
+
+.patient-page-content .doctor-result-content h3 {
+    font-size: 14px;
+    margin-bottom: 7px;
+}
+
+.patient-page-content .doctor-result-content p {
+    line-height: 1.7;
+    overflow-wrap: anywhere;
+}
+
+.patient-page-content .doctor-result-content .text-link {
+    display: inline-block;
+    margin-top: 10px;
+}
+
+.patient-detail-stack {
+    display: grid;
+    gap: 20px;
+}
+
+.patient-detail-stack .panel {
+    padding: 23px;
+}
+
+.patient-doctor-bio {
+    margin-top: 16px;
+    line-height: 1.8;
+    color: var(--muted);
+    font-size: 13px;
+}
+
+.patient-detail-stack .doctor-profile-panel h1 {
+    font-size: 23px;
+}
+
+.patient-detail-stack .doctor-profile-panel h3 {
+    font-size: 14px;
+}
+
+.patient-detail-stack .tag-list {
+    margin-top: 10px;
+}
+
+.patient-detail-stack .consultation-list strong {
+    font-size: 13px;
+}
+
+.patient-detail-stack .consultation-list span {
+    font-size: 12px;
+}
+
+.patient-detail-stack .slot-availability-item {
+    background: var(--background);
+}
+
+.patient-detail-stack .slot-date-filter input {
+    color: var(--text);
+}
+
+.patient-app-layout .sidebar {
+    width: 250px;
+}
+
+.patient-app-layout .main-content {
+    margin-left: 250px;
+}
+
+@media (max-width: 1100px) {
+    .patient-page-content .stats-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 800px) {
+    .patient-page-content .search-filter-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .patient-page-content .doctor-result-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 700px) {
+    .patient-app-layout .main-content {
+        margin-left: 0;
+    }
+
+    .patient-page-content .welcome-section {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .patient-page-content .patient-overview-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .patient-page-content .search-filter-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .patient-page-content .filter-actions {
+        flex-wrap: wrap;
+    }
+
+    .patient-detail-stack .slot-availability-item {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .patient-profile-panel .form-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .patient-profile-panel .form-actions {
+        align-items: stretch;
+        flex-direction: column;
+    }
+}

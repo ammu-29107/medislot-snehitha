@@ -1,23 +1,200 @@
 {% extends "base.html" %}
 {% block title %}My Patient Profile | MediSlot{% endblock %}
+{% set active_page = 'patient_profile' %}
+
 {% block body %}
-<div class="portal-shell patient-portal">
-<header class="portal-topbar"><a class="sidebar-brand" href="{{ url_for('patient_dashboard') }}"><span class="brand-icon">M</span><span>MediSlot</span></a><nav><a href="{{ url_for('patient_dashboard') }}">Dashboard</a><a href="{{ url_for('doctor_search') }}">Find Doctors</a><a href="{{ url_for('logout') }}">Logout</a></nav></header>
-<main class="portal-main narrow-main">
-{% include "_flash_messages.html" %}
-<div class="page-heading"><p class="eyebrow">ACCOUNT SETTINGS</p><h1>My profile</h1><p>Keep your personal and emergency contact details up to date.</p></div>
-<form method="post" class="portal-panel patient-profile-form">
-<div class="form-grid">
-<div class="form-group"><label for="full_name">Full name</label><input id="full_name" name="full_name" maxlength="150" value="{{ profile.full_name or '' }}" required></div>
-<div class="form-group"><label for="email">Email</label><input id="email" value="{{ profile.email or '' }}" disabled><small class="form-help">Email cannot be changed here.</small></div>
-<div class="form-group"><label for="date_of_birth">Date of birth</label><input id="date_of_birth" value="{{ profile.date_of_birth or '' }}" disabled></div>
-<div class="form-group"><label for="phone_number">Phone number</label><input id="phone_number" name="phone_number" maxlength="20" value="{{ profile.phone_number or '' }}" required></div>
-<div class="form-group"><label for="gender">Gender</label><select id="gender" name="gender" required><option value="">Select gender</option>{% for value,label in [('MALE','Male'),('FEMALE','Female'),('NON_BINARY','Non-binary'),('PREFER_NOT_TO_SAY','Prefer not to say')] %}<option value="{{ value }}" {% if profile.gender == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
-<div class="form-group"><label for="city">City</label><input id="city" name="city" maxlength="100" value="{{ profile.city or '' }}"></div>
-<div class="form-group"><label for="emergency_contact_name">Emergency contact name</label><input id="emergency_contact_name" name="emergency_contact_name" maxlength="150" value="{{ profile.emergency_contact_name or '' }}"></div>
-<div class="form-group"><label for="emergency_contact_phone">Emergency contact phone</label><input id="emergency_contact_phone" name="emergency_contact_phone" maxlength="20" value="{{ profile.emergency_contact_phone or '' }}"></div>
+<div class="app-layout patient-app-layout">
+
+    {% include "_patient_sidebar.html" %}
+
+    <main class="main-content">
+
+        <header class="topbar">
+            <button
+                class="menu-toggle"
+                id="menuToggle"
+                type="button"
+                aria-label="Toggle navigation"
+            >☰</button>
+
+            <div>
+                <span class="topbar-label">PATIENT PORTAL</span>
+                <h2>My Profile</h2>
+            </div>
+
+            <a
+                class="topbar-profile"
+                href="{{ url_for('patient_dashboard') }}"
+            >
+                <span class="avatar">P</span>
+                <span>
+                    <strong>Patient account</strong>
+                    <small>Personal information</small>
+                </span>
+            </a>
+        </header>
+
+        <section class="page-content patient-page-content">
+
+            <div class="welcome-section">
+                <div>
+                    <p class="eyebrow">ACCOUNT SETTINGS</p>
+                    <h1>My Profile</h1>
+                    <p class="muted">
+                        Keep your personal and emergency contact
+                        information up to date.
+                    </p>
+                </div>
+            </div>
+
+            {% include "_flash_messages.html" %}
+
+            <section class="panel patient-profile-panel">
+
+                <div class="panel-heading">
+                    <div>
+                        <h3>Personal information</h3>
+                        <p class="muted">
+                            Update your registered patient details
+                        </p>
+                    </div>
+                </div>
+
+                <form method="post">
+
+                    <div class="form-grid">
+
+                        <div class="form-group">
+                            <label for="full_name">Full name</label>
+                            <input
+                                id="full_name"
+                                name="full_name"
+                                maxlength="150"
+                                value="{{ profile.full_name or '' }}"
+                                required
+                            >
+                        </div>
+
+                        <div class="form-group">
+                            <label for="email">Email address</label>
+                            <input
+                                id="email"
+                                value="{{ profile.email or '' }}"
+                                disabled
+                            >
+                            <small class="form-help">
+                                Email cannot be changed here.
+                            </small>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="date_of_birth">Date of birth</label>
+                            <input
+                                id="date_of_birth"
+                                value="{{ profile.date_of_birth or '' }}"
+                                disabled
+                            >
+                        </div>
+
+                        <div class="form-group">
+                            <label for="phone_number">Phone number</label>
+                            <input
+                                id="phone_number"
+                                name="phone_number"
+                                maxlength="20"
+                                value="{{ profile.phone_number or '' }}"
+                                required
+                            >
+                        </div>
+
+                        <div class="form-group">
+                            <label for="gender">Gender</label>
+                            <select id="gender" name="gender" required>
+                                <option value="">Select gender</option>
+
+                                {% for value, label in [
+                                    ('MALE', 'Male'),
+                                    ('FEMALE', 'Female'),
+                                    ('NON_BINARY', 'Non-binary'),
+                                    ('PREFER_NOT_TO_SAY', 'Prefer not to say')
+                                ] %}
+                                    <option
+                                        value="{{ value }}"
+                                        {% if profile.gender == value %}selected{% endif %}
+                                    >
+                                        {{ label }}
+                                    </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="city">City</label>
+                            <input
+                                id="city"
+                                name="city"
+                                maxlength="100"
+                                value="{{ profile.city or '' }}"
+                            >
+                        </div>
+
+                    </div>
+
+                    <div class="patient-form-section">
+                        <h3>Emergency contact</h3>
+                        <p class="muted">
+                            Contact details to use in an emergency.
+                        </p>
+                    </div>
+
+                    <div class="form-grid">
+
+                        <div class="form-group">
+                            <label for="emergency_contact_name">
+                                Emergency contact name
+                            </label>
+
+                            <input
+                                id="emergency_contact_name"
+                                name="emergency_contact_name"
+                                maxlength="150"
+                                value="{{ profile.emergency_contact_name or '' }}"
+                            >
+                        </div>
+
+                        <div class="form-group">
+                            <label for="emergency_contact_phone">
+                                Emergency contact phone
+                            </label>
+
+                            <input
+                                id="emergency_contact_phone"
+                                name="emergency_contact_phone"
+                                maxlength="20"
+                                value="{{ profile.emergency_contact_phone or '' }}"
+                            >
+                        </div>
+
+                    </div>
+
+                    <div class="form-actions">
+                        <button class="btn btn-primary" type="submit">
+                            Save changes
+                        </button>
+
+                        <a
+                            class="btn btn-secondary"
+                            href="{{ url_for('patient_dashboard') }}"
+                        >
+                            Cancel
+                        </a>
+                    </div>
+
+                </form>
+
+            </section>
+
+        </section>
+    </main>
 </div>
-<div class="form-actions"><button class="btn btn-primary" type="submit">Save changes</button><a class="btn btn-secondary" href="{{ url_for('patient_dashboard') }}">Cancel</a></div>
-</form>
-</main></div>
 {% endblock %}
