@@ -60,17 +60,32 @@
 
                 <section class="panel doctor-profile-panel">
 
-                    <p class="eyebrow">PROFESSIONAL PROFILE</p>
+                    <div class="public-doctor-profile-header">
+                        <div class="public-doctor-photo">
+                            {% if doctor.profile_photo_url %}
+                                <img
+                                    src="{{ doctor.profile_photo_url }}"
+                                    alt="Dr. {{ doctor.full_name }}"
+                                    data-image-preview="{{ doctor.profile_photo_url }}"
+                                    data-image-expiry="{{ doctor.profile_photo_url_expires_in }}"
+                                >
+                            {% else %}
+                                <span>Dr</span>
+                            {% endif %}
+                        </div>
 
-                    <h1>Dr. {{ doctor.full_name }}</h1>
+                        <div class="public-doctor-heading">
+                            <p class="eyebrow">VERIFIED PROFESSIONAL PROFILE</p>
+                            <h1>Dr. {{ doctor.full_name }}</h1>
 
-                    <p>
-                        {{ doctor.qualifications or 'Qualifications not listed' }}
-
-                        {% if doctor.experience_years is not none %}
-                            · {{ doctor.experience_years }} years experience
-                        {% endif %}
-                    </p>
+                            <p>
+                                {{ doctor.qualifications or 'Qualifications not listed' }}
+                                {% if doctor.experience_years is not none %}
+                                    · {{ doctor.experience_years }} years experience
+                                {% endif %}
+                            </p>
+                        </div>
+                    </div>
 
                     <p class="patient-doctor-bio">
                         {{ doctor.bio or 'No biography has been provided.' }}
@@ -157,8 +172,7 @@
                             <p class="eyebrow">SCHEDULE</p>
                             <h3>Available slots</h3>
                             <p class="muted">
-                                Check remaining capacity across your
-                                selected date range.
+                                Explore available consultation times and remaining capacity.
                             </p>
                         </div>
                     </div>
@@ -171,6 +185,7 @@
                                 type="date"
                                 name="start_date"
                                 value="{{ start_date }}"
+                                required
                             >
                         </label>
 
@@ -180,6 +195,7 @@
                                 type="date"
                                 name="end_date"
                                 value="{{ end_date }}"
+                                required
                             >
                         </label>
 
@@ -189,33 +205,58 @@
 
                     </form>
 
-                    {% if slots %}
+                    {% if slots_by_date %}
 
-                        <div class="slot-availability-list">
+                        <div class="doctor-schedule">
 
-                            {% for slot in slots %}
+                            {% for day in slots_by_date %}
 
-                                <div class="slot-availability-item">
+                                <div class="doctor-schedule-day">
 
-                                    <div>
-                                        <strong>
-                                            {{ slot.start_at|ist_datetime }}
-                                        </strong>
-
+                                    <div class="doctor-schedule-date">
+                                        <h4>{{ day.date_label }}</h4>
                                         <span>
-                                            {{ slot.consultation_type }}
-                                            · {{ slot.duration_minutes }} min
+                                            {{ day.slots|length }}
+                                            available slot(s)
                                         </span>
                                     </div>
 
-                                    <div class="slot-seat-count">
-                                        {{ slot.remaining_seats }}
-                                        seat(s) remaining
-                                    </div>
+                                    <div class="doctor-schedule-slots">
 
-                                    <span>
-                                        ₹{{ '%.2f'|format(slot.consultation_fee|float) }}
-                                    </span>
+                                        {% for slot in day.slots %}
+
+                                            <div class="doctor-schedule-slot">
+
+                                                <div class="doctor-schedule-time">
+                                                    <strong>
+                                                        {{ slot.start_at|ist_datetime }}
+                                                    </strong>
+                                                    <span>
+                                                        {{ slot.duration_minutes }} minutes
+                                                    </span>
+                                                </div>
+
+                                                <div class="doctor-schedule-type">
+                                                    <strong>
+                                                        {{ slot.consultation_type }}
+                                                    </strong>
+                                                    <span>
+                                                        ₹{{ '%.2f'|format(slot.consultation_fee|float) }}
+                                                    </span>
+                                                </div>
+
+                                                <div class="doctor-schedule-capacity">
+                                                    <strong>
+                                                        {{ slot.remaining_seats }}
+                                                    </strong>
+                                                    <span>Seats remaining</span>
+                                                </div>
+
+                                            </div>
+
+                                        {% endfor %}
+
+                                    </div>
 
                                 </div>
 

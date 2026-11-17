@@ -488,6 +488,7 @@ def doctor_search():
                            active_page="doctor_search")
 
 
+
 @app.route("/doctors/<int:doctor_id>")
 @patient_required
 def doctor_detail(doctor_id):
@@ -495,19 +496,73 @@ def doctor_detail(doctor_id):
     if status != 200:
         flash(data.get("message", "Unable to load doctor profile."), "error")
         return redirect(url_for("doctor_search"))
+
     doctor = data.get("doctor", {})
-    start_date = request.args.get("start_date", date.today().isoformat())
-    end_date = request.args.get("end_date", (date.today() + timedelta(days=30)).isoformat())
-    params = {"start_date": start_date, "end_date": end_date}
+
+    start_date = request.args.get(
+        "start_date", date.today().isoformat()
+    )
+    end_date = request.args.get(
+        "end_date", (date.today() + timedelta(days=30)).isoformat()
+    )
+
+    params = {
+        "start_date": start_date,
+        "end_date": end_date,
+    }
+
     if request.args.get("consultation_type_id"):
         params["consultation_type_id"] = request.args["consultation_type_id"]
-    slots_data, slots_status = call_doctor_api("GET", f"/doctors/{doctor_id}/slots", params=params)
+
+    slots_data, slots_status = call_doctor_api(
+        "GET",
+        f"/doctors/{doctor_id}/slots",
+        params=params,
+    )
+
     slots = slots_data.get("slots", []) if slots_status == 200 else []
+
     if slots_status != 200:
-        flash(slots_data.get("message", "Unable to load slot availability."), "error")
-    return render_template("doctor_detail.html", doctor=doctor, slots=slots,
-                           start_date=start_date, end_date=end_date,
-                           active_page="doctor_search")
+        flash(
+            slots_data.get("message", "Unable to load slot availability."),
+            "error",
+        )
+
+    # Group available slots by their local calendar date.
+    grouped_slots = {}
+
+    for slot in slots:
+        start_at = datetime.fromisoformat(
+            slot["start_at"].replace("Z", "+00:00")
+        )
+
+        if start_at.tzinfo is not None:
+            start_at = start_at.astimezone(IST)
+
+        slot_date = start_at.date()
+
+        if slot_date not in grouped_slots:
+            grouped_slots[slot_date] = {
+                "date": slot_date,
+                "date_label": start_at.strftime("%A, %d %B %Y"),
+                "slots": [],
+            }
+
+        grouped_slots[slot_date]["slots"].append(slot)
+
+    slots_by_date = [
+        grouped_slots[slot_date]
+        for slot_date in sorted(grouped_slots)
+    ]
+
+    return render_template(
+        "doctor_detail.html",
+        doctor=doctor,
+        slots_by_date=slots_by_date,
+        start_date=start_date,
+        end_date=end_date,
+        active_page="doctor_search",
+    )
 
 
 @app.route("/dashboard")

@@ -10,6 +10,8 @@ Parameters:
     Type: String
   ArtifactsBucketName:
     Type: String
+  PrivateFilesBucketName:
+    Type: String
   DatabaseHost:
     Type: String
   DatabaseUsername:
@@ -39,6 +41,10 @@ Resources:
               - Effect: Allow
                 Action: ssm:GetParameter
                 Resource: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${ProjectName}/${Environment}/database/password'
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource: !Sub 'arn:${AWS::Partition}:s3:::${PrivateFilesBucketName}/doctor-profiles/*'
 
   PatientPortalFunction:
     Type: AWS::Lambda::Function
@@ -69,6 +75,7 @@ Resources:
           DB_USER: !Ref DatabaseUsername
           DB_PASSWORD_PARAMETER: !Sub '/${ProjectName}/${Environment}/database/password'
           LOG_LEVEL: INFO
+          PRIVATE_FILES_BUCKET: !Ref PrivateFilesBucketName
 
   PatientPortalIntegration:
     Type: AWS::ApiGatewayV2::Integration

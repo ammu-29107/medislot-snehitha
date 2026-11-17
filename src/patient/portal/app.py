@@ -16,7 +16,10 @@ DB_PORT = int(os.environ.get("DB_PORT", "3306"))
 DB_NAME = os.environ.get("DB_NAME", "medislot")
 DB_USER = os.environ["DB_USER"]
 DB_PASSWORD_PARAMETER = os.environ["DB_PASSWORD_PARAMETER"]
+PRIVATE_FILES_BUCKET = os.environ.get("PRIVATE_FILES_BUCKET", "")
+
 ssm = boto3.client("ssm")
+s3 = boto3.client("s3")
 
 
 def response(status, payload):
@@ -154,6 +157,35 @@ def _deactivate_profile(event):
             conn.commit()
     return response(200, {"message": "Patient profile deactivated."})
 
+def _add_doctor_photo_url(doctor):
+    doctor_id = doctor.get("doctor_id")
+    photo_key = doctor.get("profile_photo_key")
+
+    if (
+        PRIVATE_FILES_BUCKET
+        and photo_key
+        and isinstance(photo_key, str)
+        and photo_key.startswith(f"doctor-profiles/{doctor_id}/")
+    ):
+        try:
+            doctor["profile_photo_url"] = s3.generate_presigned_url(
+                "get_object",
+                Params={
+                    "Bucket": PRIVATE_FILES_BUCKET,
+                    "Key": photo_key,
+                },
+                ExpiresIn=300,
+            )
+            doctor["profile_photo_url_expires_in"] = 300
+        except ClientError:
+            logger.exception("Unable to generate doctor profile photo URL")
+            doctor["profile_photo_url"] = None
+            doctor["profile_photo_url_expires_in"] = None
+    else:
+        doctor["profile_photo_url"] = None
+        doctor["profile_photo_url_expires_in"] = None
+
+    return doctor
 
 def _doctor_search(event):
     q = _query(event)
@@ -201,7 +233,7 @@ def _doctor_search(event):
             cur.execute(
                 f"""
                 SELECT d.doctor_id, d.full_name, d.qualifications,
-                       d.experience_years, d.bio,
+                       d.experience_years, d.bio, d.profile_photo_key,
                        h.hospital_name, h.city, h.state,
                        GROUP_CONCAT(DISTINCT s.speciality_name ORDER BY s.speciality_name SEPARATOR ', ') AS specialities
                 FROM doctors d
@@ -210,7 +242,7 @@ def _doctor_search(event):
                 LEFT JOIN specialities s ON s.speciality_id=ds.speciality_id
                 WHERE {where}
                 GROUP BY d.doctor_id, d.full_name, d.qualifications,
-                         d.experience_years, d.bio,
+                         d.experience_years, d.bio, d.profile_photo_key,
                          h.hospital_name, h.city, h.state
                 ORDER BY d.full_name ASC, d.doctor_id ASC
                 LIMIT %s OFFSET %s
@@ -218,6 +250,7 @@ def _doctor_search(event):
                 tuple(params + [page_size, offset]),
             )
             doctors = cur.fetchall()
+            doctors = [_add_doctor_photo_url(doctor) for doctor in doctors]
     return response(200, {
         "doctors": doctors, "pagination": {
             "page": page, "page_size": page_size, "total": total,
@@ -239,7 +272,7 @@ def _doctor_detail(event):
             cur.execute(
                 """
                 SELECT d.doctor_id, d.full_name, d.qualifications,
-                       d.experience_years, d.bio,
+                       d.experience_years, d.bio, d.profile_photo_key,
                        h.hospital_name, h.address_line, h.city, h.state,
                        h.postal_code, h.contact_number
                 FROM doctors d JOIN hospitals h ON h.hospital_id=d.hospital_id
@@ -272,6 +305,7 @@ def _doctor_detail(event):
                 """, (doctor_id,)
             )
             doctor["consultation_types"] = cur.fetchall()
+            doctor = _add_doctor_photo_url(doctor)
     return response(200, {"doctor": doctor})
 
 

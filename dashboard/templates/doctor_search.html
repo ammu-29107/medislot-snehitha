@@ -135,7 +135,18 @@
 
                         <article class="doctor-result-card">
 
-                            <div class="doctor-avatar">Dr</div>
+                            <div class="doctor-avatar doctor-result-photo">
+                                {% if doctor.profile_photo_url %}
+                                    <img
+                                        src="{{ doctor.profile_photo_url }}"
+                                        alt="Dr. {{ doctor.full_name }}"
+                                        data-image-preview="{{ doctor.profile_photo_url }}"
+                                        data-image-expiry="{{ doctor.profile_photo_url_expires_in }}"
+                                    >
+                                {% else %}
+                                    <span>Dr</span>
+                                {% endif %}
+                            </div>
 
                             <div class="doctor-result-content">
 
