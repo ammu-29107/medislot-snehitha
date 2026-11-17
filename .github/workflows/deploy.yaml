@@ -966,6 +966,7 @@ jobs:
           echo "database_host=$(get_output DatabaseEndpoint)" >> "$GITHUB_OUTPUT"
           echo "database_username=$(get_output DatabaseUsername)" >> "$GITHUB_OUTPUT"
           echo "artifacts_bucket=$(get_output DeploymentArtifactsBucketName)" >> "$GITHUB_OUTPUT"
+          echo "private_files_bucket=$(get_output PrivateFilesBucketName)" >> "$GITHUB_OUTPUT"
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
