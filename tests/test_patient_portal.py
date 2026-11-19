@@ -5,6 +5,7 @@ os.environ.setdefault("DB_HOST", "localhost")
 os.environ.setdefault("DB_USER", "test")
 os.environ.setdefault("DB_PASSWORD_PARAMETER", "/test/database/password")
 os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
+os.environ.setdefault("SESSIONS_TABLE", "medislot-test-sessions")
 
 from src.patient.portal import app as portal
 
