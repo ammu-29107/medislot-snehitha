@@ -45,6 +45,12 @@ Resources:
                 Action:
                   - s3:GetObject
                 Resource: !Sub 'arn:${AWS::Partition}:s3:::${PrivateFilesBucketName}/doctor-profiles/*'
+              - Sid: RevokePatientSessions
+                Effect: Allow
+                Action:
+                  - dynamodb:UpdateItem
+                Resource: !Sub
+                  'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ProjectName}-${Environment}-sessions'
 
   PatientPortalFunction:
     Type: AWS::Lambda::Function
@@ -76,6 +82,7 @@ Resources:
           DB_PASSWORD_PARAMETER: !Sub '/${ProjectName}/${Environment}/database/password'
           LOG_LEVEL: INFO
           PRIVATE_FILES_BUCKET: !Ref PrivateFilesBucketName
+          SESSIONS_TABLE: !Sub '${ProjectName}-${Environment}-sessions'
 
   PatientPortalIntegration:
     Type: AWS::ApiGatewayV2::Integration

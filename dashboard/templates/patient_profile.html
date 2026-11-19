@@ -199,6 +199,58 @@
                         </div>
                     </form>
                 </div>
+
+                <!-- Account Deactivation Section -->
+                <div class="patient-danger-zone">
+
+                    <div class="patient-danger-content">
+                        <p class="eyebrow">ACCOUNT MANAGEMENT</p>
+
+                        <h3>Delete Account</h3>
+
+                        <p>
+                            You can deactivate your MediSlot patient
+                            account when you no longer need it.
+                        </p>
+
+                        <p>
+                            For your safety, account deletion is not
+                            permitted while you have active appointments.
+                            Please complete or cancel those appointments
+                            before proceeding.
+                        </p>
+
+                        <p>
+                            Once your account is deactivated, you will
+                            be signed out and will no longer be able
+                            to access your patient account.
+                        </p>
+                    </div>
+
+                    <form
+                        method="POST"
+                        action="{{ url_for('deactivate_patient_account') }}"
+                        onsubmit="return confirm(
+                            'Are you sure you want to deactivate your MediSlot patient account?'
+                        );"
+                    >
+
+                        <input
+                            type="hidden"
+                            name="csrf_token"
+                            value="{{ csrf_token }}"
+                        >
+
+                        <button
+                            type="submit"
+                            class="btn patient-delete-button"
+                        >
+                            Delete My Account
+                        </button>
+
+                    </form>
+
+                </div>
             </section>
         </section>
     </main>

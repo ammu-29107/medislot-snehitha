@@ -185,6 +185,7 @@
                                 type="date"
                                 name="start_date"
                                 value="{{ start_date }}"
+                                min="{{ today }}"
                                 required
                             >
                         </label>
@@ -195,6 +196,7 @@
                                 type="date"
                                 name="end_date"
                                 value="{{ end_date }}"
+                                min="{{ start_date }}"
                                 required
                             >
                         </label>
@@ -223,33 +225,40 @@
 
                                     <div class="doctor-schedule-slots">
 
-                                        {% for slot in day.slots %}
+                                        {% for type_name, type_slots in day.slots|groupby('consultation_type') %}
 
-                                            <div class="doctor-schedule-slot">
+                                            <div class="doctor-slot-group">
 
-                                                <div class="doctor-schedule-time">
-                                                    <strong>
-                                                        {{ slot.start_at|ist_datetime }}
-                                                    </strong>
-                                                    <span>
-                                                        {{ slot.duration_minutes }} minutes
-                                                    </span>
+                                                <div class="doctor-slot-group-heading">
+                                                    <div>
+                                                        <strong>{{ type_name }}</strong>
+                                                        <span>
+                                                            {{ type_slots[0].duration_minutes }} minutes
+                                                            · ₹{{ '%.2f'|format(type_slots[0].consultation_fee|float) }}
+                                                        </span>
+                                                    </div>
+
+                                                    <small>{{ type_slots|length }} available</small>
                                                 </div>
 
-                                                <div class="doctor-schedule-type">
-                                                    <strong>
-                                                        {{ slot.consultation_type }}
-                                                    </strong>
-                                                    <span>
-                                                        ₹{{ '%.2f'|format(slot.consultation_fee|float) }}
-                                                    </span>
-                                                </div>
+                                                <div class="doctor-slot-chips">
 
-                                                <div class="doctor-schedule-capacity">
-                                                    <strong>
-                                                        {{ slot.remaining_seats }}
-                                                    </strong>
-                                                    <span>Seats remaining</span>
+                                                    {% for slot in type_slots %}
+
+                                                        <div class="doctor-slot-chip">
+                                                            <strong>{{ slot.start_at|ist_time }}</strong>
+                                                            <span>
+                                                                {{ slot.remaining_seats }}
+                                                                {% if slot.remaining_seats|int == 1 %}
+                                                                    seat
+                                                                {% else %}
+                                                                    seats
+                                                                {% endif %}
+                                                            </span>
+                                                        </div>
+
+                                                    {% endfor %}
+
                                                 </div>
 
                                             </div>

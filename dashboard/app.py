@@ -1,5 +1,7 @@
 import os
 import json
+import hmac
+import secrets
 import logging
 import uuid
 from datetime import date, datetime, timedelta
@@ -465,7 +467,93 @@ def patient_profile():
     if status != 200:
         flash(data.get("message", "Unable to load your profile."), "error")
         return redirect(url_for("patient_dashboard"))
-    return render_template("patient_profile.html", profile=data.get("profile", {}), active_page="patient_profile")
+    csrf_token = session.setdefault(
+        "patient_delete_csrf_token",
+        secrets.token_urlsafe(32)
+    )
+
+    return render_template(
+        "patient_profile.html",
+        profile=data.get("profile", {}),
+        csrf_token=csrf_token,
+        active_page="patient_profile"
+    )
+
+
+@app.route(
+    "/patient/profile/deactivate",
+    methods=["POST"]
+)
+@patient_required
+def deactivate_patient_account():
+
+    submitted_token = request.form.get("csrf_token", "")
+    stored_token = session.get(
+        "patient_delete_csrf_token", ""
+    )
+
+    if (
+        not submitted_token
+        or not stored_token
+        or not hmac.compare_digest(
+            submitted_token,
+            stored_token
+        )
+    ):
+        flash(
+            "Your request could not be verified. Please try again.",
+            "error"
+        )
+        return redirect(url_for("patient_profile"))
+
+    data, status = call_doctor_api(
+        "DELETE",
+        "/patient/profile"
+    )
+
+    if status == 409:
+        flash(
+            data.get(
+                "message",
+                "You cannot delete your account while active appointments exist."
+            ),
+            "error"
+        )
+        return redirect(url_for("patient_profile"))
+
+    if status == 200:
+        # Clear all local authentication information.
+        session.clear()
+
+        flash(
+            "Your patient account has been deactivated successfully.",
+            "success"
+        )
+
+        # The index route now displays the public welcome page.
+        return redirect(url_for("index"))
+
+    if status == 401:
+        session.clear()
+
+        flash(
+            "Your session has expired. Please sign in again.",
+            "warning"
+        )
+
+        return redirect(
+            url_for("login", role="patient")
+        )
+
+    flash(
+        data.get(
+            "message",
+            "Unable to deactivate your account. Please try again."
+        ),
+        "error"
+    )
+
+    return redirect(url_for("patient_profile"))
 
 
 @app.route("/doctors")
@@ -499,12 +587,29 @@ def doctor_detail(doctor_id):
 
     doctor = data.get("doctor", {})
 
-    start_date = request.args.get(
-        "start_date", date.today().isoformat()
-    )
-    end_date = request.args.get(
-        "end_date", (date.today() + timedelta(days=30)).isoformat()
-    )
+    today = datetime.now(IST).date()
+    default_start = today.isoformat()
+    default_end = (today + timedelta(days=30)).isoformat()
+
+    start_date = request.args.get("start_date", default_start)
+    end_date = request.args.get("end_date", default_end)
+
+    try:
+        selected_start = date.fromisoformat(start_date)
+        selected_end = date.fromisoformat(end_date)
+
+        if selected_start < today or selected_end < today:
+            flash("Past dates cannot be selected. Showing availability from today.", "error")
+            start_date = default_start
+            end_date = default_end
+        elif selected_end < selected_start:
+            flash("The end date cannot be earlier than the start date.", "error")
+            end_date = start_date
+
+    except (TypeError, ValueError):
+        flash("Invalid date selection. Showing the default availability range.", "error")
+        start_date = default_start
+        end_date = default_end
 
     params = {
         "start_date": start_date,
@@ -561,6 +666,7 @@ def doctor_detail(doctor_id):
         slots_by_date=slots_by_date,
         start_date=start_date,
         end_date=end_date,
+        today=today.isoformat(),
         active_page="doctor_search",
     )
 

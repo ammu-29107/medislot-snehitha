@@ -17,9 +17,13 @@ DB_NAME = os.environ.get("DB_NAME", "medislot")
 DB_USER = os.environ["DB_USER"]
 DB_PASSWORD_PARAMETER = os.environ["DB_PASSWORD_PARAMETER"]
 PRIVATE_FILES_BUCKET = os.environ.get("PRIVATE_FILES_BUCKET", "")
+SESSIONS_TABLE = os.environ["SESSIONS_TABLE"]
 
 ssm = boto3.client("ssm")
 s3 = boto3.client("s3")
+
+dynamodb = boto3.resource("dynamodb")
+sessions_table = dynamodb.Table(SESSIONS_TABLE)
 
 
 def response(status, payload):
@@ -141,21 +145,195 @@ def _update_profile(event):
     return response(200, {"message": "Profile updated successfully.", "profile": profile})
 
 
+
 def _deactivate_profile(event):
     patient_id = _patient_id(event)
+
     if not patient_id:
-        return response(401, {"message": "A valid patient session is required."})
-    with _connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "UPDATE patients SET status='DISABLED' WHERE patient_id=%s AND status='ACTIVE'",
-                (patient_id,),
-            )
-            if cur.rowcount != 1:
+        return response(
+            401,
+            {"message": "A valid patient session is required."}
+        )
+
+    authorizer_context = (
+        event.get("requestContext", {})
+        .get("authorizer", {})
+        .get("lambda", {})
+    )
+
+    session_id = authorizer_context.get("session_id")
+
+    if not session_id:
+        return response(
+            401,
+            {"message": "A valid patient session is required."}
+        )
+
+    # Slots are stored as local IST DATETIME values.
+    now_ist = datetime.now(
+        ZoneInfo("Asia/Kolkata")
+    ).replace(tzinfo=None)
+
+    try:
+        with _connection() as conn:
+            try:
+                with conn.cursor() as cur:
+
+                    # Lock the patient record while processing
+                    # the deactivation request.
+                    cur.execute(
+                        """
+                        SELECT patient_id
+                        FROM patients
+                        WHERE patient_id=%s
+                          AND status='ACTIVE'
+                        FOR UPDATE
+                        """,
+                        (patient_id,)
+                    )
+
+                    patient = cur.fetchone()
+
+                    if not patient:
+                        conn.rollback()
+                        return response(
+                            404,
+                            {
+                                "message": (
+                                    "Active patient profile not found."
+                                )
+                            }
+                        )
+
+                    # Check for a confirmed appointment that
+                    # has not yet ended.
+                    cur.execute(
+                        """
+                        SELECT a.appointment_id
+                        FROM appointments a
+                        INNER JOIN slots sl
+                            ON sl.slot_id = a.slot_id
+                        WHERE a.patient_id=%s
+                          AND a.status='CONFIRMED'
+                          AND sl.end_at > %s
+                        LIMIT 1
+                        FOR UPDATE
+                        """,
+                        (patient_id, now_ist)
+                    )
+
+                    active_appointment = cur.fetchone()
+
+                    if active_appointment:
+                        conn.rollback()
+
+                        return response(
+                            409,
+                            {
+                                "code": "ACTIVE_APPOINTMENTS_EXIST",
+                                "message": (
+                                    "Your account cannot be deleted "
+                                    "while you have active appointments. "
+                                    "Please complete or cancel your "
+                                    "appointments before trying again."
+                                )
+                            }
+                        )
+
+                    # Revoke the current authentication session.
+                    # The refresh endpoint and authorizer both
+                    # require the session status to be ACTIVE.
+                    try:
+                        sessions_table.update_item(
+                            Key={
+                                "session_id": session_id
+                            },
+                            UpdateExpression=(
+                                "SET #status=:revoked, revokedAt=:now"
+                            ),
+                            ConditionExpression=(
+                                "#status=:active "
+                                "AND userId=:user_id "
+                                "AND #role=:patient_role"
+                            ),
+                            ExpressionAttributeNames={
+                                "#status": "status",
+                                "#role": "role"
+                            },
+                            ExpressionAttributeValues={
+                                ":revoked": "REVOKED",
+                                ":active": "ACTIVE",
+                                ":user_id": str(patient_id),
+                                ":patient_role": "PATIENT",
+                                ":now": int(datetime.now().timestamp())
+                            }
+                        )
+
+                    except ClientError as exc:
+                        error_code = exc.response.get(
+                            "Error", {}
+                        ).get("Code")
+
+                        if error_code == "ConditionalCheckFailedException":
+                            conn.rollback()
+
+                            return response(
+                                401,
+                                {
+                                    "message": (
+                                        "Your session is invalid "
+                                        "or has already expired."
+                                    )
+                                }
+                            )
+
+                        raise
+
+                    # Deactivate the patient without deleting
+                    # historical appointment records.
+                    cur.execute(
+                        """
+                        UPDATE patients
+                        SET status='DISABLED'
+                        WHERE patient_id=%s
+                          AND status='ACTIVE'
+                        """,
+                        (patient_id,)
+                    )
+
+                    if cur.rowcount != 1:
+                        conn.rollback()
+
+                        return response(
+                            409,
+                            {
+                                "message": (
+                                    "Unable to deactivate this account."
+                                )
+                            }
+                        )
+
+                conn.commit()
+
+            except Exception:
                 conn.rollback()
-                return response(404, {"message": "Active patient profile not found."})
-            conn.commit()
-    return response(200, {"message": "Patient profile deactivated."})
+                raise
+
+        return response(
+            200,
+            {
+                "message": (
+                    "Patient account deactivated successfully."
+                )
+            }
+        )
+
+    except Exception:
+        logger.exception(
+            "Patient account deactivation failed"
+        )
+        raise
+
 
 def _add_doctor_photo_url(doctor):
     doctor_id = doctor.get("doctor_id")
@@ -324,6 +502,14 @@ def _doctor_slots(event):
         end = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
     except ValueError:
         return response(400, {"message": "Dates must use YYYY-MM-DD format."})
+
+    requested_end_date = (end - timedelta(days=1)).date()
+
+    if start.date() < today_ist or requested_end_date < today_ist:
+        return response(
+            400,
+            {"message": "Past dates are not allowed. Select today or a future date."}
+        )
     if end <= start or (end - start).days > 92:
         return response(400, {"message": "Choose a date range of 1 to 92 days."})
     try:
