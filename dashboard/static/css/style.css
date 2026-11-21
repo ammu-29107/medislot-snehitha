@@ -2784,3 +2784,198 @@ input:disabled {
         width: 100%;
     }
 }
+
+
+/* Patient doctor profile: daily availability browser */
+
+.slot-browser {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.slot-browser-filter {
+    display: grid;
+    grid-template-columns: minmax(180px, 1fr) minmax(220px, 1fr) auto;
+    gap: 14px;
+    align-items: end;
+    padding: 18px;
+    background: var(--surface-soft, #f8fbfc);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+}
+
+.slot-browser-field {
+    min-width: 0;
+}
+
+.slot-browser-field label {
+    display: block;
+    margin-bottom: 7px;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text);
+}
+
+.slot-browser-field input,
+.slot-browser-field select {
+    width: 100%;
+    min-height: 44px;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    background: #fff;
+    color: var(--text);
+    font-size: 13px;
+}
+
+.slot-browser-field input:focus,
+.slot-browser-field select:focus {
+    outline: none;
+    border-color: var(--teal);
+    box-shadow: 0 0 0 3px rgba(21, 155, 145, .12);
+}
+
+.slot-day-navigation {
+    display: grid;
+    grid-template-columns: 1fr minmax(150px, auto) 1fr;
+    gap: 12px;
+    align-items: center;
+}
+
+.slot-day-navigation > :last-child {
+    justify-self: end;
+}
+
+.slot-selected-date {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    text-align: center;
+}
+
+.slot-selected-date strong {
+    font-size: 16px;
+    color: var(--navy);
+}
+
+.slot-selected-date span {
+    font-size: 11px;
+    color: var(--muted);
+}
+
+.slot-nav-disabled {
+    opacity: .45;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
+.slot-day-content {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+}
+
+.slot-period {
+    padding: 18px;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: var(--white);
+}
+
+.slot-period-heading {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 14px;
+}
+
+.slot-period-heading h4 {
+    font-size: 14px;
+    color: var(--navy);
+}
+
+.slot-period-heading span {
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.slot-period-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+    gap: 12px;
+}
+
+.slot-availability-card {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+    padding: 14px;
+    border: 1px solid var(--border);
+    border-radius: 11px;
+    background: var(--surface-soft, #f8fbfc);
+}
+
+.slot-availability-time {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--navy);
+}
+
+.slot-availability-type {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--teal-dark);
+}
+
+.slot-availability-meta,
+.slot-availability-capacity {
+    font-size: 11px;
+    color: var(--muted);
+}
+
+.slot-empty-day {
+    padding: 28px 18px;
+}
+
+@media (max-width: 700px) {
+    .slot-browser-filter {
+        grid-template-columns: 1fr;
+    }
+
+    .slot-browser-filter .btn {
+        width: 100%;
+    }
+
+    .slot-day-navigation {
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+    }
+
+    .slot-selected-date {
+        grid-column: 1 / -1;
+        grid-row: 1;
+    }
+
+    .slot-day-navigation > :last-child {
+        justify-self: end;
+    }
+
+    .slot-period-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 9px;
+    }
+
+    .slot-availability-card {
+        padding: 12px;
+    }
+}
+
+@media (max-width: 420px) {
+    .slot-period-grid {
+        grid-template-columns: 1fr;
+    }
+}

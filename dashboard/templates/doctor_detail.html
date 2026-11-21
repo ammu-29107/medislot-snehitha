@@ -177,113 +177,155 @@
                         </div>
                     </div>
 
-                    <form method="get" class="slot-date-filter">
+                    <div class="slot-browser">
 
-                        <label>
-                            From
-                            <input
-                                type="date"
-                                name="start_date"
-                                value="{{ start_date }}"
-                                min="{{ today }}"
-                                required
+                        <form method="get" class="slot-browser-filter">
+
+                            <div class="slot-browser-field">
+                                <label for="selected_date">Appointment date</label>
+                                <input
+                                    id="selected_date"
+                                    type="date"
+                                    name="selected_date"
+                                    value="{{ selected_date }}"
+                                    min="{{ today }}"
+                                    required
+                                >
+                            </div>
+
+                            <div class="slot-browser-field">
+                                <label for="consultation_type_id">Consultation type</label>
+                                <select
+                                    id="consultation_type_id"
+                                    name="consultation_type_id"
+                                >
+                                    <option value="">All consultation types</option>
+
+                                    {% for item in doctor.consultation_types %}
+                                        <option
+                                            value="{{ item.consultation_type_id }}"
+                                            {% if consultation_type_id|string == item.consultation_type_id|string %}
+                                                selected
+                                            {% endif %}
+                                        >
+                                            {{ item.type_name }}
+                                            · {{ item.duration_minutes }} min
+                                        </option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+
+                            <button class="btn btn-primary" type="submit">
+                                View slots
+                            </button>
+
+                        </form>
+
+                        <div class="slot-day-navigation">
+
+                            {% if selected_date > today %}
+                                <a
+                                    class="btn btn-secondary"
+                                    href="{{ url_for(
+                                        'doctor_detail',
+                                        doctor_id=doctor.doctor_id,
+                                        selected_date=previous_date,
+                                        consultation_type_id=consultation_type_id
+                                    ) }}"
+                                >
+                                    ← Previous day
+                                </a>
+                            {% else %}
+                                <span class="btn btn-secondary slot-nav-disabled">
+                                    ← Previous day
+                                </span>
+                            {% endif %}
+
+                            <div class="slot-selected-date">
+                                <strong>{{ selected_date }}</strong>
+                                <span>Selected availability date</span>
+                            </div>
+
+                            <a
+                                class="btn btn-secondary"
+                                href="{{ url_for(
+                                    'doctor_detail',
+                                    doctor_id=doctor.doctor_id,
+                                    selected_date=next_date,
+                                    consultation_type_id=consultation_type_id
+                                ) }}"
                             >
-                        </label>
-
-                        <label>
-                            To
-                            <input
-                                type="date"
-                                name="end_date"
-                                value="{{ end_date }}"
-                                min="{{ start_date }}"
-                                required
-                            >
-                        </label>
-
-                        <button class="btn btn-primary" type="submit">
-                            Check availability
-                        </button>
-
-                    </form>
-
-                    {% if slots_by_date %}
-
-                        <div class="doctor-schedule">
-
-                            {% for day in slots_by_date %}
-
-                                <div class="doctor-schedule-day">
-
-                                    <div class="doctor-schedule-date">
-                                        <h4>{{ day.date_label }}</h4>
-                                        <span>
-                                            {{ day.slots|length }}
-                                            available slot(s)
-                                        </span>
-                                    </div>
-
-                                    <div class="doctor-schedule-slots">
-
-                                        {% for type_name, type_slots in day.slots|groupby('consultation_type') %}
-
-                                            <div class="doctor-slot-group">
-
-                                                <div class="doctor-slot-group-heading">
-                                                    <div>
-                                                        <strong>{{ type_name }}</strong>
-                                                        <span>
-                                                            {{ type_slots[0].duration_minutes }} minutes
-                                                            · ₹{{ '%.2f'|format(type_slots[0].consultation_fee|float) }}
-                                                        </span>
-                                                    </div>
-
-                                                    <small>{{ type_slots|length }} available</small>
-                                                </div>
-
-                                                <div class="doctor-slot-chips">
-
-                                                    {% for slot in type_slots %}
-
-                                                        <div class="doctor-slot-chip">
-                                                            <strong>{{ slot.start_at|ist_time }}</strong>
-                                                            <span>
-                                                                {{ slot.remaining_seats }}
-                                                                {% if slot.remaining_seats|int == 1 %}
-                                                                    seat
-                                                                {% else %}
-                                                                    seats
-                                                                {% endif %}
-                                                            </span>
-                                                        </div>
-
-                                                    {% endfor %}
-
-                                                </div>
-
-                                            </div>
-
-                                        {% endfor %}
-
-                                    </div>
-
-                                </div>
-
-                            {% endfor %}
+                                Next day →
+                            </a>
 
                         </div>
 
-                    {% else %}
+                        {% if slots_by_period %}
 
-                        <div class="empty-state compact-empty">
-                            <h4>No available slots found</h4>
-                            <p>
-                                No open slots with remaining capacity
-                                were found in this date range.
-                            </p>
-                        </div>
+                            <div class="slot-day-content">
 
-                    {% endif %}
+                                {% for period in slots_by_period %}
+
+                                    <section class="slot-period">
+
+                                        <div class="slot-period-heading">
+                                            <h4>{{ period.name }}</h4>
+                                            <span>{{ period.slots|length }} available</span>
+                                        </div>
+
+                                        <div class="slot-period-grid">
+
+                                            {% for slot in period.slots %}
+
+                                                <article class="slot-availability-card">
+
+                                                    <strong class="slot-availability-time">
+                                                        {{ slot.start_at|ist_time }}
+                                                    </strong>
+
+                                                    <span class="slot-availability-type">
+                                                        {{ slot.consultation_type }}
+                                                    </span>
+
+                                                    <span class="slot-availability-meta">
+                                                        {{ slot.duration_minutes }} min
+                                                        · ₹{{ '%.2f'|format(slot.consultation_fee|float) }}
+                                                    </span>
+
+                                                    <span class="slot-availability-capacity">
+                                                        {{ slot.remaining_seats }}
+                                                        {% if slot.remaining_seats|int == 1 %}
+                                                            seat remaining
+                                                        {% else %}
+                                                            seats remaining
+                                                        {% endif %}
+                                                    </span>
+
+                                                </article>
+
+                                            {% endfor %}
+
+                                        </div>
+
+                                    </section>
+
+                                {% endfor %}
+
+                            </div>
+
+                        {% else %}
+
+                            <div class="empty-state compact-empty slot-empty-day">
+                                <h4>No available slots for this day</h4>
+                                <p>
+                                    Try another date or select a different consultation type.
+                                </p>
+                            </div>
+
+                        {% endif %}
+
+                    </div>
+
 
                     <p class="form-help">
                         This page displays availability only.

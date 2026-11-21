@@ -588,36 +588,35 @@ def doctor_detail(doctor_id):
     doctor = data.get("doctor", {})
 
     today = datetime.now(IST).date()
-    default_start = today.isoformat()
-    default_end = (today + timedelta(days=30)).isoformat()
+    today_iso = today.isoformat()
 
-    start_date = request.args.get("start_date", default_start)
-    end_date = request.args.get("end_date", default_end)
+    selected_date = request.args.get(
+        "selected_date",
+        request.args.get("start_date", today_iso),
+    )
 
     try:
-        selected_start = date.fromisoformat(start_date)
-        selected_end = date.fromisoformat(end_date)
+        selected_day = date.fromisoformat(selected_date)
 
-        if selected_start < today or selected_end < today:
-            flash("Past dates cannot be selected. Showing availability from today.", "error")
-            start_date = default_start
-            end_date = default_end
-        elif selected_end < selected_start:
-            flash("The end date cannot be earlier than the start date.", "error")
-            end_date = start_date
+        if selected_day < today:
+            flash("Past dates cannot be selected.", "warning")
+            selected_day = today
 
     except (TypeError, ValueError):
-        flash("Invalid date selection. Showing the default availability range.", "error")
-        start_date = default_start
-        end_date = default_end
+        flash("Invalid date. Showing today's availability.", "warning")
+        selected_day = today
+
+    selected_date = selected_day.isoformat()
+
+    consultation_type_id = request.args.get("consultation_type_id", "").strip()
 
     params = {
-        "start_date": start_date,
-        "end_date": end_date,
+        "start_date": selected_date,
+        "end_date": selected_date,
     }
 
-    if request.args.get("consultation_type_id"):
-        params["consultation_type_id"] = request.args["consultation_type_id"]
+    if consultation_type_id:
+        params["consultation_type_id"] = consultation_type_id
 
     slots_data, slots_status = call_doctor_api(
         "GET",
@@ -633,8 +632,12 @@ def doctor_detail(doctor_id):
             "error",
         )
 
-    # Group available slots by their local calendar date.
-    grouped_slots = {}
+    # Group the selected day's slots by IST time of day.
+    periods = {
+        "Morning": [],
+        "Afternoon": [],
+        "Evening": [],
+    }
 
     for slot in slots:
         start_at = datetime.fromisoformat(
@@ -644,29 +647,35 @@ def doctor_detail(doctor_id):
         if start_at.tzinfo is not None:
             start_at = start_at.astimezone(IST)
 
-        slot_date = start_at.date()
+        hour = start_at.hour
 
-        if slot_date not in grouped_slots:
-            grouped_slots[slot_date] = {
-                "date": slot_date,
-                "date_label": start_at.strftime("%A, %d %B %Y"),
-                "slots": [],
-            }
+        if hour < 12:
+            period = "Morning"
+        elif hour < 17:
+            period = "Afternoon"
+        else:
+            period = "Evening"
 
-        grouped_slots[slot_date]["slots"].append(slot)
+        periods[period].append(slot)
 
-    slots_by_date = [
-        grouped_slots[slot_date]
-        for slot_date in sorted(grouped_slots)
+    slots_by_period = [
+        {"name": name, "slots": period_slots}
+        for name, period_slots in periods.items()
+        if period_slots
     ]
+
+    previous_date = (selected_day - timedelta(days=1)).isoformat()
+    next_date = (selected_day + timedelta(days=1)).isoformat()
 
     return render_template(
         "doctor_detail.html",
         doctor=doctor,
-        slots_by_date=slots_by_date,
-        start_date=start_date,
-        end_date=end_date,
-        today=today.isoformat(),
+        slots_by_period=slots_by_period,
+        selected_date=selected_date,
+        previous_date=previous_date,
+        next_date=next_date,
+        today=today_iso,
+        consultation_type_id=consultation_type_id,
         active_page="doctor_search",
     )
 
