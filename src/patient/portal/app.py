@@ -376,7 +376,6 @@ def _doctor_search(event):
         page_size = min(50, max(1, int(q.get("page_size", "10"))))
     except (TypeError, ValueError):
         return response(400, {"message": "page and page_size must be integers."})
-    offset = (page - 1) * page_size
 
     clauses = ["d.status='ACTIVE'", "h.status='ACTIVE'"]
     params = []
@@ -408,6 +407,15 @@ def _doctor_search(event):
                 tuple(params),
             )
             total = int(cur.fetchone()["total"])
+            total_pages = (total + page_size - 1) // page_size
+
+            # Keep the requested page within the available result range.
+            if total_pages == 0:
+                page = 1
+            else:
+                page = min(page, total_pages)
+
+            offset = (page - 1) * page_size
             cur.execute(
                 f"""
                 SELECT d.doctor_id, d.full_name, d.qualifications,
@@ -432,7 +440,7 @@ def _doctor_search(event):
     return response(200, {
         "doctors": doctors, "pagination": {
             "page": page, "page_size": page_size, "total": total,
-            "total_pages": (total + page_size - 1) // page_size,
+            "total_pages": total_pages,
             "has_previous": page > 1,
             "has_next": page * page_size < total,
         }
