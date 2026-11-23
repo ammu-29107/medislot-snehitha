@@ -53,7 +53,8 @@ def handler(event, context):
         id_column = "patient_id"
         profile_columns = (
             "patient_id, full_name, email, date_of_birth, "
-            "phone_number, status"
+            "phone_number, gender, city, "
+            "emergency_contact_name, emergency_contact_phone, status"
         )
 
     try:

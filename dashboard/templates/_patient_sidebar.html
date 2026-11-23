@@ -1,0 +1,41 @@
+<aside class="sidebar" id="sidebar">
+    <a class="sidebar-brand" href="{{ url_for('patient_dashboard') }}">
+        <span class="brand-icon">M</span>
+        <span>MediSlot</span>
+    </a>
+
+    <div class="sidebar-label">PATIENT WORKSPACE</div>
+
+    <nav class="sidebar-nav" aria-label="Patient workspace">
+        <a
+            href="{{ url_for('patient_dashboard') }}"
+            class="nav-link{% if active_page == 'patient_dashboard' %} active{% endif %}"
+        >
+            <span class="nav-icon">▦</span>
+            <span>Dashboard</span>
+        </a>
+
+        <a
+            href="{{ url_for('patient_profile') }}"
+            class="nav-link{% if active_page == 'patient_profile' %} active{% endif %}"
+        >
+            <span class="nav-icon">♙</span>
+            <span>My Profile</span>
+        </a>
+
+        <a
+            href="{{ url_for('doctor_search') }}"
+            class="nav-link{% if active_page == 'doctor_search' %} active{% endif %}"
+        >
+            <span class="nav-icon">⌕</span>
+            <span>Find Doctors</span>
+        </a>
+    </nav>
+
+    <div class="sidebar-bottom">
+        <a href="{{ url_for('logout') }}" class="nav-link">
+            <span class="nav-icon">↪</span>
+            <span>Logout</span>
+        </a>
+    </div>
+</aside>

@@ -1,0 +1,258 @@
+
+{% extends "base.html" %}
+{% block title %}My Patient Profile | MediSlot{% endblock %}
+{% set active_page = 'patient_profile' %}
+
+{% block body %}
+<div class="app-layout patient-app-layout">
+    {% include "_patient_sidebar.html" %}
+
+    <main class="main-content">
+        <header class="topbar">
+            <button class="menu-toggle" id="menuToggle" type="button"
+                    aria-label="Toggle navigation">☰</button>
+            <div>
+                <span class="topbar-label">PATIENT PORTAL</span>
+                <h2>My Profile</h2>
+            </div>
+            <a class="topbar-profile" href="{{ url_for('patient_dashboard') }}">
+                <span class="avatar">{{ (profile.full_name or 'P')[:1]|upper }}</span>
+                <span>
+                    <strong>{{ profile.full_name or 'Patient account' }}</strong>
+                    <small>Patient account</small>
+                </span>
+            </a>
+        </header>
+
+        <section class="page-content patient-page-content">
+            <div class="welcome-section">
+                <div>
+                    <p class="eyebrow">YOUR ACCOUNT</p>
+                    <h1>My Profile</h1>
+                    <p class="muted">View and manage your personal information.</p>
+                </div>
+            </div>
+
+            {% include "_flash_messages.html" %}
+
+            <section class="panel patient-profile-panel">
+                <div class="patient-profile-heading">
+                    <div class="patient-profile-identity">
+                        <div class="patient-profile-avatar">
+                            {{ (profile.full_name or 'P')[:1]|upper }}
+                        </div>
+                        <div>
+                            <p class="eyebrow">PATIENT PROFILE</p>
+                            <h2>{{ profile.full_name or 'Patient' }}</h2>
+                            <p class="muted">{{ profile.email or 'Email not available' }}</p>
+                        </div>
+                    </div>
+
+                    <button class="btn btn-primary" id="editPatientProfile"
+                            type="button" aria-controls="patientProfileEditor">
+                        Edit Profile
+                    </button>
+                </div>
+
+                <div id="patientProfileView">
+                    <div class="patient-profile-section">
+                        <h3>Personal information</h3>
+                        <div class="patient-profile-details">
+                            <div>
+                                <span>Full name</span>
+                                <strong>{{ profile.full_name or 'Not provided' }}</strong>
+                            </div>
+                            <div>
+                                <span>Email address</span>
+                                <strong>{{ profile.email or 'Not provided' }}</strong>
+                            </div>
+                            <div>
+                                <span>Date of birth</span>
+                                <strong>{{ profile.date_of_birth or 'Not provided' }}</strong>
+                            </div>
+                            <div>
+                                <span>Phone number</span>
+                                <strong>{{ profile.phone_number or 'Not provided' }}</strong>
+                            </div>
+                            <div>
+                                <span>Gender</span>
+                                <strong>{{ (profile.gender or 'Not provided')|replace('_', ' ')|title }}</strong>
+                            </div>
+                            <div>
+                                <span>City</span>
+                                <strong>{{ profile.city or 'Not provided' }}</strong>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="patient-profile-section">
+                        <h3>Emergency contact</h3>
+                        <div class="patient-profile-details">
+                            <div>
+                                <span>Contact name</span>
+                                <strong>{{ profile.emergency_contact_name or 'Not provided' }}</strong>
+                            </div>
+                            <div>
+                                <span>Contact phone</span>
+                                <strong>{{ profile.emergency_contact_phone or 'Not provided' }}</strong>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="patient-profile-footer">
+                        <span class="muted">Your information is associated with your patient account.</span>
+                        <a class="btn btn-secondary" href="{{ url_for('patient_dashboard') }}">
+                            Back to dashboard
+                        </a>
+                    </div>
+                </div>
+
+                <div id="patientProfileEditor" hidden>
+                    <div class="patient-profile-section">
+                        <h3>Edit personal information</h3>
+                        <p class="muted">Update your details and save your changes.</p>
+                    </div>
+
+                    <form method="post" id="patientProfileForm">
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label for="full_name">Full name</label>
+                                <input id="full_name" name="full_name"
+                                       maxlength="150"
+                                       value="{{ profile.full_name or '' }}" required>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="email">Email address</label>
+                                <input id="email" value="{{ profile.email or '' }}" disabled>
+                                <small class="form-help">Email cannot be changed here.</small>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="date_of_birth">Date of birth</label>
+                                <input id="date_of_birth"
+                                       value="{{ profile.date_of_birth or '' }}" disabled>
+                                <small class="form-help">Date of birth cannot be changed here.</small>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="phone_number">Phone number</label>
+                                <input id="phone_number" name="phone_number"
+                                       maxlength="20"
+                                       value="{{ profile.phone_number or '' }}" required>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="gender">Gender</label>
+                                <select id="gender" name="gender" required>
+                                    <option value="">Select gender</option>
+                                    {% for value, label in [
+                                        ('MALE', 'Male'),
+                                        ('FEMALE', 'Female'),
+                                        ('NON_BINARY', 'Non-binary'),
+                                        ('PREFER_NOT_TO_SAY', 'Prefer not to say')
+                                    ] %}
+                                    <option value="{{ value }}"
+                                        {% if profile.gender == value %}selected{% endif %}>
+                                        {{ label }}
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="city">City</label>
+                                <input id="city" name="city" maxlength="100"
+                                       value="{{ profile.city or '' }}">
+                            </div>
+                        </div>
+
+                        <div class="patient-profile-section">
+                            <h3>Emergency contact</h3>
+                            <p class="muted">Provide someone we can contact in an emergency.</p>
+                        </div>
+
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label for="emergency_contact_name">Contact name</label>
+                                <input id="emergency_contact_name"
+                                       name="emergency_contact_name" maxlength="150"
+                                       value="{{ profile.emergency_contact_name or '' }}">
+                            </div>
+
+                            <div class="form-group">
+                                <label for="emergency_contact_phone">Contact phone</label>
+                                <input id="emergency_contact_phone"
+                                       name="emergency_contact_phone" maxlength="20"
+                                       value="{{ profile.emergency_contact_phone or '' }}">
+                            </div>
+                        </div>
+
+                        <div class="form-actions">
+                            <button class="btn btn-primary" type="submit">
+                                Save Changes
+                            </button>
+                            <button class="btn btn-secondary" id="cancelPatientProfile"
+                                    type="button">
+                                Cancel
+                            </button>
+                        </div>
+                    </form>
+                </div>
+
+                <!-- Account Deactivation Section -->
+                <div class="patient-danger-zone">
+
+                    <div class="patient-danger-content">
+                        <p class="eyebrow">ACCOUNT MANAGEMENT</p>
+
+                        <h3>Delete Account</h3>
+
+                        <p>
+                            You can deactivate your MediSlot patient
+                            account when you no longer need it.
+                        </p>
+
+                        <p>
+                            For your safety, account deletion is not
+                            permitted while you have active appointments.
+                            Please complete or cancel those appointments
+                            before proceeding.
+                        </p>
+
+                        <p>
+                            Once your account is deactivated, you will
+                            be signed out and will no longer be able
+                            to access your patient account.
+                        </p>
+                    </div>
+
+                    <form
+                        method="POST"
+                        action="{{ url_for('deactivate_patient_account') }}"
+                        onsubmit="return confirm(
+                            'Are you sure you want to deactivate your MediSlot patient account?'
+                        );"
+                    >
+
+                        <input
+                            type="hidden"
+                            name="csrf_token"
+                            value="{{ csrf_token }}"
+                        >
+
+                        <button
+                            type="submit"
+                            class="btn patient-delete-button"
+                        >
+                            Delete My Account
+                        </button>
+
+                    </form>
+
+                </div>
+            </section>
+        </section>
+    </main>
+</div>
+{% endblock %}

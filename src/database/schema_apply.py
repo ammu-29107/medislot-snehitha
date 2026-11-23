@@ -33,6 +33,82 @@ def execute_sql_file(cursor, sql_path):
     return len(statements)
 
 
+def ensure_patient_domain_schema(cursor):
+    changes = 0
+
+    columns = [
+        ("patients", "city", "VARCHAR(100) NULL"),
+        (
+            "patients",
+            "emergency_contact_name",
+            "VARCHAR(150) NULL",
+        ),
+        (
+            "patients",
+            "emergency_contact_phone",
+            "VARCHAR(20) NULL",
+        ),
+    ]
+
+    for table_name, column_name, definition in columns:
+        cursor.execute(
+            """
+            SELECT COUNT(*)
+            FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME = %s
+              AND COLUMN_NAME = %s
+            """,
+            (table_name, column_name),
+        )
+
+        if cursor.fetchone()[0] == 0:
+            cursor.execute(
+                f"ALTER TABLE `{table_name}` "
+                f"ADD COLUMN `{column_name}` {definition}"
+            )
+            changes += 1
+
+    indexes = [
+        (
+            "doctors",
+            "idx_doctors_status_name",
+            "status, full_name",
+        ),
+        (
+            "hospitals",
+            "idx_hospitals_status_name",
+            "status, hospital_name",
+        ),
+        (
+            "slots",
+            "idx_slots_doctor_status_start",
+            "doctor_id, status, start_at",
+        ),
+    ]
+
+    for table_name, index_name, columns_sql in indexes:
+        cursor.execute(
+            """
+            SELECT COUNT(*)
+            FROM information_schema.STATISTICS
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME = %s
+              AND INDEX_NAME = %s
+            """,
+            (table_name, index_name),
+        )
+
+        if cursor.fetchone()[0] == 0:
+            cursor.execute(
+                f"ALTER TABLE `{table_name}` "
+                f"ADD INDEX `{index_name}` ({columns_sql})"
+            )
+            changes += 1
+
+    return changes
+
+
 def handler(event, context):
     """Apply the MediSlot schema and idempotent reference-data seed."""
 
@@ -69,14 +145,16 @@ def handler(event, context):
     try:
         with connection.cursor() as cursor:
             schema_statements = execute_sql_file(cursor, schema_path)
+            migration_changes = ensure_patient_domain_schema(cursor)
             seed_statements = execute_sql_file(cursor, seed_path)
 
         logger.info(
             "Schema and reference data applied successfully to '%s'. "
-            "schema_statements=%s seed_statements=%s",
+            "schema_statements=%s seed_statements=%s migration_changes=%s",
             db_name,
             schema_statements,
             seed_statements,
+            migration_changes,
         )
 
         return {
@@ -84,6 +162,7 @@ def handler(event, context):
             "database": db_name,
             "schema_statements_executed": schema_statements,
             "seed_statements_executed": seed_statements,
+            "migration_changes": migration_changes,
         }
     finally:
         connection.close()

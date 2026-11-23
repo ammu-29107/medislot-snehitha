@@ -199,4 +199,32 @@ document.addEventListener("DOMContentLoaded", () => {
             event.preventDefault();
         }
     });
+
+
+    // Patient profile: switch between read-only and edit modes.
+    const patientProfileView = document.getElementById("patientProfileView");
+    const patientProfileEditor = document.getElementById("patientProfileEditor");
+    const editPatientProfile = document.getElementById("editPatientProfile");
+    const cancelPatientProfile = document.getElementById("cancelPatientProfile");
+    const patientProfileForm = document.getElementById("patientProfileForm");
+
+    if (patientProfileView && patientProfileEditor && editPatientProfile) {
+        editPatientProfile.addEventListener("click", () => {
+            patientProfileView.hidden = true;
+            patientProfileEditor.hidden = false;
+            editPatientProfile.hidden = true;
+
+            const firstField = patientProfileForm?.querySelector(
+                "input:not([disabled]), select"
+            );
+            firstField?.focus();
+        });
+
+        cancelPatientProfile?.addEventListener("click", () => {
+            patientProfileForm?.reset();
+            patientProfileEditor.hidden = true;
+            patientProfileView.hidden = false;
+            editPatientProfile.hidden = false;
+        });
+    }
 });

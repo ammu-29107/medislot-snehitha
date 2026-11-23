@@ -4,7 +4,7 @@
 
 RDS MySQL is the durable relational store for core business entities and transactional records. It stores users, reference data, availability rules, appointments, appointment history, waitlist business records, health-camp records, and reschedule operation history.
 
-**Materialised appointment slots do not belong in RDS.** They are generated from availability rules and stored in DynamoDB. This design intentionally has no `doctor_slots` table.
+**Milestone 4 implementation decision:** generated appointment slots are stored in the RDS `slots` table. The existing doctor slot materialiser writes this table, and the patient discovery API reads it to display availability and remaining seats. Do not create a parallel DynamoDB slot inventory for this implementation.
 
 The schema below is a logical design. Exact physical types, lengths, constraints, and migration details are to be finalised during implementation.
 
@@ -93,7 +93,7 @@ A doctor may have multiple availability windows on a weekday. Validation must pr
 
 Blackout periods suppress slot generation for the affected interval.
 
-**Important:** Neither weekly availability nor blackout records are materialised appointment slots. Generated slot inventory belongs in DynamoDB.
+**Important:** Neither weekly availability nor blackout records are materialised appointment slots. For the current implementation, generated slot inventory is persisted in the RDS `slots` table.
 
 ## 4. Appointment records
 
@@ -227,3 +227,20 @@ Policy values should be configurable through the agreed configuration mechanism 
 - Store monetary values using an exact decimal type, not floating point.
 - Use explicit status values and audit timestamps.
 - Do not add `doctor_slots` to this schema; materialised slot inventory is in DynamoDB.
+
+
+## 8. Implemented RDS slot inventory decision
+
+### `slots` (Milestone 4 implementation)
+
+The deployed MySQL schema includes the generated `slots` table. It contains:
+- `slot_id` — primary key.
+- `doctor_id`, `consultation_type_id`, and `pattern_id` — references to the doctor, consultation type, and availability pattern.
+- `start_at`, `end_at` — generated appointment interval timestamps.
+- `capacity` and `booked_count` — seat capacity and current booked count.
+- `status` — `OPEN`, `BLOCKED`, `CANCELLED`, or `COMPLETED`.
+- `created_at`, `updated_at`.
+
+The patient discovery API queries open slots in the requested date range and computes `remaining_seats = capacity - booked_count`. It returns only slots where `booked_count < capacity`. The `idx_slots_doctor_status_start` index supports the doctor/status/time-range lookup.
+
+This is the selected Milestone 4 implementation path. DynamoDB remains available for other operational coordination patterns, but it is not a second source of truth for generated slot inventory.

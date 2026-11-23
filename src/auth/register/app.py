@@ -203,6 +203,9 @@ def handler(event, context):
         date_of_birth = None
         phone_number = None
         gender = None
+        city = None
+        emergency_contact_name = None
+        emergency_contact_phone = None
 
         if role == "DOCTOR":
             license_number = body.get("licenseNumber")
@@ -337,6 +340,60 @@ def handler(event, context):
                     {"message": "Invalid gender"},
                 )
 
+            # Validate optional patient city.
+            city = body.get("city")
+
+            if city is not None:
+                if not isinstance(city, str):
+                    return response(400, {"message": "Invalid city"})
+
+                city = city.strip() or None
+
+                if city and len(city) > 100:
+                    return response(400, {"message": "City must not exceed 100 characters"})
+
+
+            # Validate optional emergency contact details.
+            emergency_contact_name = body.get("emergencyContactName")
+            emergency_contact_phone = body.get("emergencyContactPhone")
+
+            if emergency_contact_name is not None:
+                if not isinstance(emergency_contact_name, str):
+                    return response(400, {"message": "Invalid emergencyContactName"})
+
+                emergency_contact_name = emergency_contact_name.strip() or None
+
+                if emergency_contact_name and len(emergency_contact_name) > 150:
+                    return response(
+                        400,
+                        {"message": "Emergency contact name must not exceed 150 characters"},
+                    )
+
+            if emergency_contact_phone is not None:
+                if not isinstance(emergency_contact_phone, str):
+                    return response(400, {"message": "Invalid emergencyContactPhone"})
+
+                emergency_contact_phone = emergency_contact_phone.strip() or None
+
+                if emergency_contact_phone and not re.fullmatch(
+                    r"\+?[0-9]{10,15}", emergency_contact_phone
+                ):
+                    return response(
+                        400,
+                        {"message": "Invalid emergency contact phone number"},
+                    )
+
+            # Emergency contact name and phone must be provided together.
+            if bool(emergency_contact_name) != bool(emergency_contact_phone):
+                return response(
+                    400,
+                    {
+                        "message": (
+                            "Emergency contact name and phone number must both be provided"
+                        )
+                    },
+                )
+
         # Hash before storing; plaintext passwords are never persisted.
         password_hash = bcrypt.hashpw(
             password.encode("utf-8"),
@@ -448,9 +505,12 @@ def handler(event, context):
                         password_hash,
                         date_of_birth,
                         phone_number,
-                        gender
+                        gender,
+                        city,
+                        emergency_contact_name,
+                        emergency_contact_phone
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """,
                     (
                         full_name,
@@ -459,6 +519,9 @@ def handler(event, context):
                         date_of_birth,
                         phone_number,
                         gender,
+                        city,
+                        emergency_contact_name,
+                        emergency_contact_phone,
                     ),
                 )
 

@@ -20,7 +20,8 @@ CREATE TABLE IF NOT EXISTS hospitals (
         ON UPDATE CURRENT_TIMESTAMP,
 
     PRIMARY KEY (hospital_id),
-    KEY idx_hospitals_city_status (city, status)
+    KEY idx_hospitals_city_status (city, status),
+    KEY idx_hospitals_status_name (status, hospital_name)
 ) ENGINE=InnoDB;
 
 -- 2. SPECIALITIES
@@ -58,6 +59,7 @@ CREATE TABLE IF NOT EXISTS doctors (
     UNIQUE KEY uq_doctors_email (email),
     UNIQUE KEY uq_doctors_license (license_number),
     KEY idx_doctors_hospital_status (hospital_id, status),
+    KEY idx_doctors_status_name (status, full_name),
 
     CONSTRAINT chk_doctors_experience
         CHECK (experience_years IS NULL OR experience_years <= 80),
@@ -92,6 +94,7 @@ CREATE TABLE IF NOT EXISTS doctor_specialities (
 ) ENGINE=InnoDB;
 
 -- 5. PATIENTS
+
 CREATE TABLE IF NOT EXISTS patients (
     patient_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     full_name VARCHAR(150) NOT NULL,
@@ -105,6 +108,9 @@ CREATE TABLE IF NOT EXISTS patients (
         'NON_BINARY',
         'PREFER_NOT_TO_SAY'
     ) NOT NULL,
+    city VARCHAR(100) NULL,
+    emergency_contact_name VARCHAR(150) NULL,
+    emergency_contact_phone VARCHAR(20) NULL,
     status ENUM('ACTIVE', 'DISABLED') NOT NULL DEFAULT 'ACTIVE',
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -113,6 +119,7 @@ CREATE TABLE IF NOT EXISTS patients (
     PRIMARY KEY (patient_id),
     UNIQUE KEY uq_patients_email (email)
 ) ENGINE=InnoDB;
+
 
 -- 6. CONSULTATION TYPE CATALOGUE
 CREATE TABLE IF NOT EXISTS consultation_type_catalogue (
@@ -286,6 +293,11 @@ CREATE TABLE IF NOT EXISTS slots (
     KEY idx_slots_doctor_start_status (doctor_id, start_at, status),
     KEY idx_slots_consultation_type (consultation_type_id),
     KEY idx_slots_pattern (pattern_id),
+    KEY idx_slots_doctor_status_start (
+        doctor_id,
+        status,
+        start_at
+    ),
 
     CONSTRAINT chk_slots_time
         CHECK (end_at > start_at),

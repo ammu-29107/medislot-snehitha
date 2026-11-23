@@ -24,7 +24,7 @@ There is no admin application role in this design. Hospitals are preconfigured r
 ### Networking and data layer
 - A VPC contains private application/data networking components.
 - Amazon RDS for MySQL stores durable relational records and transactional business data.
-- Amazon DynamoDB stores materialised slot inventory and operational coordination records requiring conditional writes and low-latency access.
+- Amazon RDS for MySQL stores the generated slot inventory used by the current Milestone 4 doctor scheduling and patient discovery flows. DynamoDB is reserved for operational coordination records requiring conditional writes and low-latency access.
 - Amazon S3 stores appropriate static or generated objects where required; it is not the system of record for appointment transactions.
 - AWS Systems Manager Parameter Store stores configuration and secrets. Signing secrets and other sensitive values use `SecureString`.
 
@@ -49,13 +49,13 @@ There is no admin application role in this design. Hospitals are preconfigured r
 | Weekly availability patterns and blackout dates | RDS MySQL |
 | Appointments and appointment history | RDS MySQL |
 | Reschedule operation history | RDS MySQL |
-| Materialised appointment slot inventory and capacity counters | DynamoDB |
+| Materialised appointment slot inventory and capacity counters (current Milestone 4 implementation) | RDS MySQL `slots` table |
 | Idempotency records | DynamoDB |
 | Waitlist operational queue and time-limited offers/holds | DynamoDB, with durable business records in RDS where required |
 | Login session state and refresh-token hash | DynamoDB `SessionsTable` |
 | Notification dispatch/idempotency state | DynamoDB |
 
-Materialised slots are not stored in an RDS `doctor_slots` table. RDS holds the source availability rules; DynamoDB holds generated slot inventory.
+Current implementation decision: the doctor slot materialiser writes generated slots to the RDS `slots` table. The patient portal reads the same table for availability and remaining-seat counts. Do not deploy a parallel DynamoDB slot inventory.
 
 ## 5. Core booking flow
 

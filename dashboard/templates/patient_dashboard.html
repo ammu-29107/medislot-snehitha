@@ -1,36 +1,234 @@
 {% extends "base.html" %}
-{% block title %}Patient Portal | MediSlot{% endblock %}
+{% block title %}Patient Dashboard | MediSlot{% endblock %}
+{% set active_page = 'patient_dashboard' %}
+
 {% block body %}
-<div class="patient-portal-page">
-    <header class="patient-portal-header">
-        <a class="auth-brand" href="{{ url_for('patient_dashboard') }}"><span class="brand-icon">M</span><span>MediSlot</span></a>
-        <a class="patient-logout" href="{{ url_for('logout') }}">Sign out</a>
-    </header>
-    <main class="patient-portal-main">
-        <section class="patient-welcome-card">
+<div class="app-layout patient-app-layout">
+
+    {% include "_patient_sidebar.html" %}
+
+    <main class="main-content">
+
+        <header class="topbar">
+            <button
+                class="menu-toggle"
+                id="menuToggle"
+                type="button"
+                aria-label="Toggle navigation"
+            >☰</button>
+
             <div>
-                <p class="auth-eyebrow">Patient portal</p>
-                <h1>Welcome{% if profile.get('full_name') %}, {{ profile.get('full_name') }}{% endif %}</h1>
-                <p class="auth-subtitle">You are signed in to your MediSlot patient account.</p>
+                <span class="topbar-label">PATIENT PORTAL</span>
+                <h2>Overview</h2>
             </div>
-            <span class="patient-welcome-icon">♥</span>
-        </section>
-        <section class="patient-account-card">
-            <h2>Your account</h2>
-            <dl class="patient-account-details">
-                <div><dt>Full name</dt><dd>{{ profile.get('full_name', '—') }}</dd></div>
-                <div><dt>Email</dt><dd>{{ profile.get('email', '—') }}</dd></div>
-                <div><dt>Phone</dt><dd>{{ profile.get('phone_number', '—') }}</dd></div>
-                <div><dt>Date of birth</dt><dd>{{ profile.get('date_of_birth', '—') }}</dd></div>
-                <div><dt>Account status</dt><dd>{{ profile.get('status', '—') }}</dd></div>
-            </dl>
-        </section>
-        <section class="patient-next-card">
-            <span class="patient-next-icon">✚</span>
-            <div>
-                <h2>Your patient portal is ready</h2>
-                <p>Doctor discovery, appointment booking and appointment history will be connected here as the patient services are implemented.</p>
+
+            <a
+                class="topbar-profile"
+                href="{{ url_for('patient_profile') }}"
+                aria-label="Open patient profile"
+            >
+                <span class="avatar">
+                    {{ (profile.full_name or 'P')[:1]|upper }}
+                </span>
+
+                <span>
+                    <strong>{{ profile.full_name or 'Patient' }}</strong>
+                    <small>Patient account</small>
+                </span>
+            </a>
+        </header>
+
+        <section class="page-content patient-page-content">
+
+            <div class="welcome-section">
+                <div>
+                    <p class="eyebrow">YOUR HEALTHCARE AT A GLANCE</p>
+
+                    <h1>
+                        Welcome back,
+                        {{ (profile.full_name or 'Patient').split(' ')[0] }}
+                    </h1>
+
+                    <p class="muted">
+                        Manage your profile and discover doctors,
+                        consultations and available appointment slots.
+                    </p>
+                </div>
+
+                <div class="today-date">
+                    Your MediSlot account
+                </div>
             </div>
+
+            {% include "_flash_messages.html" %}
+
+            <div class="stats-grid">
+
+                <article class="stat-card">
+                    <div class="stat-top">
+                        <span class="stat-label">Profile status</span>
+                        <span class="stat-icon teal">♙</span>
+                    </div>
+
+                    <h2>
+                        {{ 'Ready' if profile.full_name and profile.phone_number else 'Review' }}
+                    </h2>
+
+                    <p>Your personal information</p>
+                </article>
+
+                <article class="stat-card">
+                    <div class="stat-top">
+                        <span class="stat-label">Contact number</span>
+                        <span class="stat-icon blue">☎</span>
+                    </div>
+
+                    <h2 class="patient-stat-value">
+                        {{ profile.phone_number or 'Not set' }}
+                    </h2>
+
+                    <p>Your registered phone number</p>
+                </article>
+
+                <article class="stat-card">
+                    <div class="stat-top">
+                        <span class="stat-label">Your city</span>
+                        <span class="stat-icon purple">⌖</span>
+                    </div>
+
+                    <h2 class="patient-stat-value">
+                        {{ profile.city or 'Not set' }}
+                    </h2>
+
+                    <p>Your registered location</p>
+                </article>
+
+                <article class="stat-card">
+                    <div class="stat-top">
+                        <span class="stat-label">Emergency contact</span>
+                        <span class="stat-icon orange">✚</span>
+                    </div>
+
+                    <h2 class="patient-stat-value">
+                        {{ 'Added' if profile.emergency_contact_name and profile.emergency_contact_phone else 'Not added' }}
+                    </h2>
+
+                    <p>Emergency contact information</p>
+                </article>
+
+            </div>
+
+            <div class="content-grid">
+
+                <section class="panel">
+
+                    <div class="panel-heading">
+                        <div>
+                            <h3>My profile overview</h3>
+                            <p class="muted">
+                                Your registered personal information
+                            </p>
+                        </div>
+
+                        <a
+                            href="{{ url_for('patient_profile') }}"
+                            class="text-link"
+                        >
+                            Edit profile →
+                        </a>
+                    </div>
+
+                    <div class="patient-overview-grid">
+
+                        <div>
+                            <span>Full name</span>
+                            <strong>{{ profile.full_name or 'Not available' }}</strong>
+                        </div>
+
+                        <div>
+                            <span>Email address</span>
+                            <strong>{{ profile.email or 'Not available' }}</strong>
+                        </div>
+
+                        <div>
+                            <span>Phone number</span>
+                            <strong>{{ profile.phone_number or 'Not provided' }}</strong>
+                        </div>
+
+                        <div>
+                            <span>City</span>
+                            <strong>{{ profile.city or 'Not provided' }}</strong>
+                        </div>
+
+                        <div>
+                            <span>Emergency contact</span>
+                            <strong>{{ profile.emergency_contact_name or 'Not provided' }}</strong>
+                        </div>
+
+                        <div>
+                            <span>Emergency phone</span>
+                            <strong>{{ profile.emergency_contact_phone or 'Not provided' }}</strong>
+                        </div>
+
+                    </div>
+
+                </section>
+
+                <section class="panel quick-panel">
+
+                    <div class="panel-heading">
+                        <div>
+                            <h3>Quick actions</h3>
+                            <p class="muted">Manage your healthcare journey</p>
+                        </div>
+                    </div>
+
+                    <a
+                        href="{{ url_for('doctor_search') }}"
+                        class="action-link"
+                    >
+                        <span class="action-icon teal">⌕</span>
+
+                        <span>
+                            <strong>Find a doctor</strong>
+                            <small>Search doctors by name and speciality</small>
+                        </span>
+
+                        <span class="action-arrow">→</span>
+                    </a>
+
+                    <a
+                        href="{{ url_for('patient_profile') }}"
+                        class="action-link"
+                    >
+                        <span class="action-icon purple">♙</span>
+
+                        <span>
+                            <strong>My profile</strong>
+                            <small>Update your personal information</small>
+                        </span>
+
+                        <span class="action-arrow">→</span>
+                    </a>
+
+                    <a
+                        href="{{ url_for('doctor_search') }}"
+                        class="action-link"
+                    >
+                        <span class="action-icon blue">◷</span>
+
+                        <span>
+                            <strong>Explore availability</strong>
+                            <small>View doctors and available slots</small>
+                        </span>
+
+                        <span class="action-arrow">→</span>
+                    </a>
+
+                </section>
+
+            </div>
+
         </section>
     </main>
 </div>

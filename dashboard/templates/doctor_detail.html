@@ -1,0 +1,342 @@
+{% extends "base.html" %}
+{% block title %}Dr. {{ doctor.full_name }} | MediSlot{% endblock %}
+{% set active_page = 'doctor_search' %}
+
+{% block body %}
+<div class="app-layout patient-app-layout">
+
+    {% include "_patient_sidebar.html" %}
+
+    <main class="main-content">
+
+        <header class="topbar">
+            <button
+                class="menu-toggle"
+                id="menuToggle"
+                type="button"
+                aria-label="Toggle navigation"
+            >☰</button>
+
+            <div>
+                <span class="topbar-label">PATIENT PORTAL</span>
+                <h2>Doctor Profile</h2>
+            </div>
+
+            <a
+                class="topbar-profile"
+                href="{{ url_for('patient_profile') }}"
+            >
+                <span class="avatar">P</span>
+                <span>
+                    <strong>Patient account</strong>
+                    <small>Doctor discovery</small>
+                </span>
+            </a>
+        </header>
+
+        <section class="page-content patient-page-content">
+
+            <div class="welcome-section">
+                <div>
+                    <p class="eyebrow">DOCTOR DIRECTORY</p>
+                    <h1>Doctor details</h1>
+                    <p class="muted">
+                        Review the doctor's professional information
+                        and available consultation slots.
+                    </p>
+                </div>
+
+                <a
+                    class="text-link"
+                    href="{{ url_for('doctor_search') }}"
+                >
+                    ← Back to doctors
+                </a>
+            </div>
+
+            {% include "_flash_messages.html" %}
+
+            <div class="patient-detail-stack">
+
+                <section class="panel doctor-profile-panel">
+
+                    <div class="public-doctor-profile-header">
+                        <div class="public-doctor-photo">
+                            {% if doctor.profile_photo_url %}
+                                <img
+                                    src="{{ doctor.profile_photo_url }}"
+                                    alt="Dr. {{ doctor.full_name }}"
+                                    data-image-preview="{{ doctor.profile_photo_url }}"
+                                    data-image-expiry="{{ doctor.profile_photo_url_expires_in }}"
+                                >
+                            {% else %}
+                                <span>Dr</span>
+                            {% endif %}
+                        </div>
+
+                        <div class="public-doctor-heading">
+                            <p class="eyebrow">VERIFIED PROFESSIONAL PROFILE</p>
+                            <h1>Dr. {{ doctor.full_name }}</h1>
+
+                            <p>
+                                {{ doctor.qualifications or 'Qualifications not listed' }}
+                                {% if doctor.experience_years is not none %}
+                                    · {{ doctor.experience_years }} years experience
+                                {% endif %}
+                            </p>
+                        </div>
+                    </div>
+
+                    <p class="patient-doctor-bio">
+                        {{ doctor.bio or 'No biography has been provided.' }}
+                    </p>
+
+                    <h3>Specialities</h3>
+
+                    <div class="tag-list">
+                        {% for item in doctor.specialities %}
+                            <span>{{ item.speciality_name }}</span>
+                        {% else %}
+                            <span>Not listed</span>
+                        {% endfor %}
+                    </div>
+
+                    <h3>Hospital</h3>
+
+                    <p>
+                        {{ doctor.hospital_name }}
+                        <br>
+                        {{ doctor.address_line }},
+                        {{ doctor.city }},
+                        {{ doctor.state }}
+                        {{ doctor.postal_code }}
+                    </p>
+
+                    {% if doctor.contact_number %}
+                        <p>Contact: {{ doctor.contact_number }}</p>
+                    {% endif %}
+
+                </section>
+
+                <section class="panel">
+
+                    <div class="panel-heading">
+                        <div>
+                            <p class="eyebrow">CONSULTATION OPTIONS</p>
+                            <h3>Consultation types and fees</h3>
+                        </div>
+                    </div>
+
+                    {% if doctor.consultation_types %}
+
+                        <div class="consultation-list">
+
+                            {% for item in doctor.consultation_types %}
+
+                                <div>
+                                    <strong>{{ item.type_name }}</strong>
+
+                                    <span>
+                                        {{ item.duration_minutes }} min
+                                        · Capacity {{ item.capacity }}
+                                        · ₹{{ '%.2f'|format(item.consultation_fee|float) }}
+                                    </span>
+
+                                    {% if item.description %}
+                                        <p>{{ item.description }}</p>
+                                    {% endif %}
+                                </div>
+
+                            {% endfor %}
+
+                        </div>
+
+                    {% else %}
+
+                        <div class="empty-state compact-empty">
+                            <h4>No consultation types available</h4>
+                            <p>
+                                This doctor has not listed any active
+                                consultation types.
+                            </p>
+                        </div>
+
+                    {% endif %}
+
+                </section>
+
+                <section class="panel">
+
+                    <div class="panel-heading">
+                        <div>
+                            <p class="eyebrow">SCHEDULE</p>
+                            <h3>Available slots</h3>
+                            <p class="muted">
+                                Explore available consultation times and remaining capacity.
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="slot-browser">
+
+                        <form method="get" class="slot-browser-filter">
+
+                            <div class="slot-browser-field">
+                                <label for="selected_date">Appointment date</label>
+                                <input
+                                    id="selected_date"
+                                    type="date"
+                                    name="selected_date"
+                                    value="{{ selected_date }}"
+                                    min="{{ today }}"
+                                    required
+                                >
+                            </div>
+
+                            <div class="slot-browser-field">
+                                <label for="consultation_type_id">Consultation type</label>
+                                <select
+                                    id="consultation_type_id"
+                                    name="consultation_type_id"
+                                >
+                                    <option value="">All consultation types</option>
+
+                                    {% for item in doctor.consultation_types %}
+                                        <option
+                                            value="{{ item.consultation_type_id }}"
+                                            {% if consultation_type_id|string == item.consultation_type_id|string %}
+                                                selected
+                                            {% endif %}
+                                        >
+                                            {{ item.type_name }}
+                                            · {{ item.duration_minutes }} min
+                                        </option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+
+                            <button class="btn btn-primary" type="submit">
+                                View slots
+                            </button>
+
+                        </form>
+
+                        <div class="slot-day-navigation">
+
+                            {% if selected_date > today %}
+                                <a
+                                    class="btn btn-secondary"
+                                    href="{{ url_for(
+                                        'doctor_detail',
+                                        doctor_id=doctor.doctor_id,
+                                        selected_date=previous_date,
+                                        consultation_type_id=consultation_type_id
+                                    ) }}"
+                                >
+                                    ← Previous day
+                                </a>
+                            {% else %}
+                                <span class="btn btn-secondary slot-nav-disabled">
+                                    ← Previous day
+                                </span>
+                            {% endif %}
+
+                            <div class="slot-selected-date">
+                                <strong>{{ selected_date }}</strong>
+                                <span>Selected availability date</span>
+                            </div>
+
+                            <a
+                                class="btn btn-secondary"
+                                href="{{ url_for(
+                                    'doctor_detail',
+                                    doctor_id=doctor.doctor_id,
+                                    selected_date=next_date,
+                                    consultation_type_id=consultation_type_id
+                                ) }}"
+                            >
+                                Next day →
+                            </a>
+
+                        </div>
+
+                        {% if slots_by_period %}
+
+                            <div class="slot-day-content">
+
+                                {% for period in slots_by_period %}
+
+                                    <section class="slot-period">
+
+                                        <div class="slot-period-heading">
+                                            <h4>{{ period.name }}</h4>
+                                            <span>{{ period.slots|length }} available</span>
+                                        </div>
+
+                                        <div class="slot-period-grid">
+
+                                            {% for slot in period.slots %}
+
+                                                <article class="slot-availability-card">
+
+                                                    <strong class="slot-availability-time">
+                                                        {{ slot.start_at|ist_time }}
+                                                    </strong>
+
+                                                    <span class="slot-availability-type">
+                                                        {{ slot.consultation_type }}
+                                                    </span>
+
+                                                    <span class="slot-availability-meta">
+                                                        {{ slot.duration_minutes }} min
+                                                        · ₹{{ '%.2f'|format(slot.consultation_fee|float) }}
+                                                    </span>
+
+                                                    <span class="slot-availability-capacity">
+                                                        {{ slot.remaining_seats }}
+                                                        {% if slot.remaining_seats|int == 1 %}
+                                                            seat remaining
+                                                        {% else %}
+                                                            seats remaining
+                                                        {% endif %}
+                                                    </span>
+
+                                                </article>
+
+                                            {% endfor %}
+
+                                        </div>
+
+                                    </section>
+
+                                {% endfor %}
+
+                            </div>
+
+                        {% else %}
+
+                            <div class="empty-state compact-empty slot-empty-day">
+                                <h4>No available slots for this day</h4>
+                                <p>
+                                    Try another date or select a different consultation type.
+                                </p>
+                            </div>
+
+                        {% endif %}
+
+                    </div>
+
+
+                    <p class="form-help">
+                        This page displays availability only.
+                        Appointment booking is not part of this milestone.
+                    </p>
+
+                </section>
+
+            </div>
+
+        </section>
+    </main>
+</div>
+{% endblock %}

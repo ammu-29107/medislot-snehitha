@@ -1,5 +1,7 @@
 import os
 import json
+import hmac
+import secrets
 import logging
 import uuid
 from datetime import date, datetime, timedelta
@@ -404,6 +406,13 @@ def register(role):
             "dateOfBirth": request.form.get("dateOfBirth", "").strip(),
             "phoneNumber": request.form.get("phoneNumber", "").strip(),
             "gender": request.form.get("gender", "").strip(),
+            "city": request.form.get("city", "").strip(),
+            "emergencyContactName": request.form.get(
+                "emergencyContactName", ""
+            ).strip(),
+            "emergencyContactPhone": request.form.get(
+                "emergencyContactPhone", ""
+            ).strip(),
         })
         if not all(payload[key] for key in ("dateOfBirth", "phoneNumber", "gender")):
             flash("Please complete your date of birth, phone number and gender.", "error")
@@ -429,17 +438,246 @@ def register(role):
 @app.route("/patient/dashboard")
 @patient_required
 def patient_dashboard():
-    profile_data, profile_status = call_doctor_api("GET", "/profile")
-    if profile_status == 200:
-        profile = profile_data.get("profile", {})
-    else:
-        profile = {}
+    profile_data, profile_status = call_doctor_api("GET", "/patient/profile")
+    profile = profile_data.get("profile", {}) if profile_status == 200 else {}
+    if profile_status != 200:
+        flash(profile_data.get("message", "Unable to load your patient profile."), "error")
+    return render_template("patient_dashboard.html", profile=profile, active_page="patient_dashboard")
+
+
+@app.route("/patient/profile", methods=["GET", "POST"])
+@patient_required
+def patient_profile():
+    if request.method == "POST":
+        payload = {
+            "full_name": request.form.get("full_name", "").strip(),
+            "phone_number": request.form.get("phone_number", "").strip(),
+            "gender": request.form.get("gender", "").strip(),
+            "city": request.form.get("city", "").strip(),
+            "emergency_contact_name": request.form.get("emergency_contact_name", "").strip(),
+            "emergency_contact_phone": request.form.get("emergency_contact_phone", "").strip(),
+        }
+        data, status = call_doctor_api("PUT", "/patient/profile", json=payload)
+        if status == 200:
+            flash("Your profile was updated.", "success")
+            return redirect(url_for("patient_profile"))
+        flash(data.get("message", "Unable to update your profile."), "error")
+
+    data, status = call_doctor_api("GET", "/patient/profile")
+    if status != 200:
+        flash(data.get("message", "Unable to load your profile."), "error")
+        return redirect(url_for("patient_dashboard"))
+    csrf_token = session.setdefault(
+        "patient_delete_csrf_token",
+        secrets.token_urlsafe(32)
+    )
+
+    return render_template(
+        "patient_profile.html",
+        profile=data.get("profile", {}),
+        csrf_token=csrf_token,
+        active_page="patient_profile"
+    )
+
+
+@app.route(
+    "/patient/profile/deactivate",
+    methods=["POST"]
+)
+@patient_required
+def deactivate_patient_account():
+
+    submitted_token = request.form.get("csrf_token", "")
+    stored_token = session.get(
+        "patient_delete_csrf_token", ""
+    )
+
+    if (
+        not submitted_token
+        or not stored_token
+        or not hmac.compare_digest(
+            submitted_token,
+            stored_token
+        )
+    ):
         flash(
-            profile_data.get("message", "Unable to load your patient profile."),
+            "Your request could not be verified. Please try again.",
+            "error"
+        )
+        return redirect(url_for("patient_profile"))
+
+    data, status = call_doctor_api(
+        "DELETE",
+        "/patient/profile"
+    )
+
+    if status == 409:
+        flash(
+            data.get(
+                "message",
+                "You cannot delete your account while active appointments exist."
+            ),
+            "error"
+        )
+        return redirect(url_for("patient_profile"))
+
+    if status == 200:
+        # Clear all local authentication information.
+        session.clear()
+
+        flash(
+            "Your patient account has been deactivated successfully.",
+            "success"
+        )
+
+        # The index route now displays the public welcome page.
+        return redirect(url_for("index"))
+
+    if status == 401:
+        session.clear()
+
+        flash(
+            "Your session has expired. Please sign in again.",
+            "warning"
+        )
+
+        return redirect(
+            url_for("login", role="patient")
+        )
+
+    flash(
+        data.get(
+            "message",
+            "Unable to deactivate your account. Please try again."
+        ),
+        "error"
+    )
+
+    return redirect(url_for("patient_profile"))
+
+
+@app.route("/doctors")
+@patient_required
+def doctor_search():
+    filters = {
+        "name": request.args.get("name", "").strip(),
+        "hospital": request.args.get("hospital", "").strip(),
+        "speciality": request.args.get("speciality", "").strip(),
+        "city": request.args.get("city", "").strip(),
+        "page": request.args.get("page", "1"),
+        "page_size": "10",
+    }
+    data, status = call_doctor_api("GET", "/doctors", params=filters)
+    if status != 200:
+        flash(data.get("message", "Unable to search doctors."), "error")
+        data = {"doctors": [], "pagination": {"page": 1, "total_pages": 0}}
+    return render_template("doctor_search.html", doctors=data.get("doctors", []),
+                           pagination=data.get("pagination", {}), filters=filters,
+                           active_page="doctor_search")
+
+
+
+@app.route("/doctors/<int:doctor_id>")
+@patient_required
+def doctor_detail(doctor_id):
+    data, status = call_doctor_api("GET", f"/doctors/{doctor_id}")
+    if status != 200:
+        flash(data.get("message", "Unable to load doctor profile."), "error")
+        return redirect(url_for("doctor_search"))
+
+    doctor = data.get("doctor", {})
+
+    today = datetime.now(IST).date()
+    today_iso = today.isoformat()
+
+    selected_date = request.args.get(
+        "selected_date",
+        request.args.get("start_date", today_iso),
+    )
+
+    try:
+        selected_day = date.fromisoformat(selected_date)
+
+        if selected_day < today:
+            flash("Past dates cannot be selected.", "warning")
+            selected_day = today
+
+    except (TypeError, ValueError):
+        flash("Invalid date. Showing today's availability.", "warning")
+        selected_day = today
+
+    selected_date = selected_day.isoformat()
+
+    consultation_type_id = request.args.get("consultation_type_id", "").strip()
+
+    params = {
+        "start_date": selected_date,
+        "end_date": selected_date,
+    }
+
+    if consultation_type_id:
+        params["consultation_type_id"] = consultation_type_id
+
+    slots_data, slots_status = call_doctor_api(
+        "GET",
+        f"/doctors/{doctor_id}/slots",
+        params=params,
+    )
+
+    slots = slots_data.get("slots", []) if slots_status == 200 else []
+
+    if slots_status != 200:
+        flash(
+            slots_data.get("message", "Unable to load slot availability."),
             "error",
         )
 
-    return render_template("patient_dashboard.html", profile=profile)
+    # Group the selected day's slots by IST time of day.
+    periods = {
+        "Morning": [],
+        "Afternoon": [],
+        "Evening": [],
+    }
+
+    for slot in slots:
+        start_at = datetime.fromisoformat(
+            slot["start_at"].replace("Z", "+00:00")
+        )
+
+        if start_at.tzinfo is not None:
+            start_at = start_at.astimezone(IST)
+
+        hour = start_at.hour
+
+        if hour < 12:
+            period = "Morning"
+        elif hour < 17:
+            period = "Afternoon"
+        else:
+            period = "Evening"
+
+        periods[period].append(slot)
+
+    slots_by_period = [
+        {"name": name, "slots": period_slots}
+        for name, period_slots in periods.items()
+        if period_slots
+    ]
+
+    previous_date = (selected_day - timedelta(days=1)).isoformat()
+    next_date = (selected_day + timedelta(days=1)).isoformat()
+
+    return render_template(
+        "doctor_detail.html",
+        doctor=doctor,
+        slots_by_period=slots_by_period,
+        selected_date=selected_date,
+        previous_date=previous_date,
+        next_date=next_date,
+        today=today_iso,
+        consultation_type_id=consultation_type_id,
+        active_page="doctor_search",
+    )
 
 
 @app.route("/dashboard")
