@@ -54,6 +54,47 @@ def get_connection():
     )
 
 
+
+def enqueue_slot_inventory(cursor, slot_id):
+    """Record a slot inventory change in the current SQL transaction."""
+    cursor.execute(
+        """
+        UPDATE slots
+        SET inventory_version = inventory_version + 1
+        WHERE slot_id = %s
+        """,
+        (slot_id,),
+    )
+
+    if cursor.rowcount != 1:
+        raise RuntimeError(
+            f"Could not increment inventory version for slot {slot_id}"
+        )
+
+    cursor.execute(
+        """
+        SELECT inventory_version
+        FROM slots
+        WHERE slot_id = %s
+        """,
+        (slot_id,),
+    )
+    row = cursor.fetchone()
+
+    if not row:
+        raise RuntimeError(
+            f"Could not read inventory version for slot {slot_id}"
+        )
+
+    cursor.execute(
+        """
+        INSERT INTO slot_inventory_outbox (slot_id, slot_version)
+        VALUES (%s, %s)
+        """,
+        (slot_id, int(row["inventory_version"])),
+    )
+
+
 def get_identity(event):
     authorizer = event.get("requestContext", {}).get("authorizer", {})
     context = authorizer.get("lambda", authorizer)
@@ -227,6 +268,7 @@ def create_slot(cursor, doctor_id, data):
     )
 
     slot_id = cursor.lastrowid
+    enqueue_slot_inventory(cursor, int(slot_id))
 
     return {
         "slot_id": slot_id,
@@ -353,6 +395,9 @@ def create_blackout(cursor, doctor_id, data):
         """,
         (doctor_id, end_at, start_at),
     )
+
+    for slot in affected_slots:
+        enqueue_slot_inventory(cursor, int(slot["slot_id"]))
 
     return (
         blackout_id,

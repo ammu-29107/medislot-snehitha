@@ -180,6 +180,92 @@ def ensure_appointments_schema(cursor):
 
     return changes
 
+def ensure_slot_inventory_schema(cursor):
+    """Add durable MySQL-backed slot inventory state and backfill events."""
+    changes = 0
+
+    columns = [
+        (
+            "active_hold_count",
+            "SMALLINT UNSIGNED NOT NULL DEFAULT 0",
+        ),
+        (
+            "inventory_version",
+            "BIGINT UNSIGNED NOT NULL DEFAULT 0",
+        ),
+    ]
+
+    # Add missing columns to existing databases.
+    for column_name, definition in columns:
+        cursor.execute(
+            """
+            SELECT COUNT(*)
+            FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME = 'slots'
+              AND COLUMN_NAME = %s
+            """,
+            (column_name,),
+        )
+
+        if cursor.fetchone()[0] == 0:
+            cursor.execute(
+                f"ALTER TABLE slots "
+                f"ADD COLUMN `{column_name}` {definition}"
+            )
+            changes += 1
+
+    # Add the inventory capacity constraint if it is missing.
+    cursor.execute(
+        """
+        SELECT COUNT(*)
+        FROM information_schema.TABLE_CONSTRAINTS
+        WHERE CONSTRAINT_SCHEMA = DATABASE()
+          AND TABLE_NAME = 'slots'
+          AND CONSTRAINT_NAME = 'chk_slots_inventory_capacity'
+          AND CONSTRAINT_TYPE = 'CHECK'
+        """
+    )
+
+    if cursor.fetchone()[0] == 0:
+        cursor.execute(
+            """
+            ALTER TABLE slots
+            ADD CONSTRAINT chk_slots_inventory_capacity
+            CHECK (
+                booked_count + active_hold_count <= capacity
+            )
+            """
+        )
+        changes += 1
+
+    # Give existing slots an initial source version.
+    cursor.execute(
+        """
+        UPDATE slots
+        SET inventory_version = 1
+        WHERE inventory_version = 0
+        """
+    )
+    changes += cursor.rowcount
+
+    # Ensure every existing slot/version has a durable inventory event.
+    # The unique key on (slot_id, slot_version) prevents duplicates.
+    cursor.execute(
+        """
+        INSERT IGNORE INTO slot_inventory_outbox (
+            slot_id,
+            slot_version
+        )
+        SELECT
+            slot_id,
+            inventory_version
+        FROM slots
+        """
+    )
+    changes += cursor.rowcount
+
+    return changes
 
 def handler(event, context):
     """Apply the MediSlot schema and idempotent reference-data seed."""
@@ -225,23 +311,30 @@ def handler(event, context):
                 ensure_appointments_schema(cursor)
             )
 
+            slot_inventory_migration_changes = (
+                ensure_slot_inventory_schema(cursor)
+            )
+
             seed_statements = execute_sql_file(cursor, seed_path)
 
         migration_changes = (
             patient_migration_changes
             + appointment_migration_changes
+            + slot_inventory_migration_changes
         )
 
         logger.info(
             "Schema and reference data applied successfully to '%s'. "
             "schema_statements=%s seed_statements=%s "
             "patient_migration_changes=%s "
-            "appointment_migration_changes=%s",
+            "appointment_migration_changes=%s "
+            "slot_inventory_migration_changes=%s",
             db_name,
             schema_statements,
             seed_statements,
             patient_migration_changes,
             appointment_migration_changes,
+            slot_inventory_migration_changes,
         )
 
         return {
@@ -253,6 +346,7 @@ def handler(event, context):
             "appointment_migration_changes": (
                 appointment_migration_changes
             ),
+            "slot_inventory_migration_changes": slot_inventory_migration_changes,
             "migration_changes": migration_changes,
         }
     finally:

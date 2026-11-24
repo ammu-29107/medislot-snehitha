@@ -1395,6 +1395,26 @@ jobs:
             zip -qr "$RUNNER_TEMP/appointments-outbox-publisher.zip" .
           )
 
+      - name: Package slot inventory projector Lambda
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          PACKAGE_DIR="$RUNNER_TEMP/appointments-inventory-projector"
+          mkdir -p "$PACKAGE_DIR"
+
+          python -m pip install \
+            --disable-pip-version-check \
+            -r src/appointments/inventory_projector/requirements.txt \
+            --target "$PACKAGE_DIR"
+
+          cp src/appointments/inventory_projector/app.py "$PACKAGE_DIR/app.py"
+
+          (
+            cd "$PACKAGE_DIR"
+            zip -qr "$RUNNER_TEMP/appointments-inventory-projector.zip" .
+          )
+
       - name: Upload appointment API package
         id: package
         shell: bash
@@ -1427,6 +1447,22 @@ jobs:
 
           echo "outbox_publisher_key=${KEY}" >> "$GITHUB_OUTPUT"
 
+      - name: Upload slot inventory projector package
+        id: inventory_projector_package
+        shell: bash
+        env:
+          ARTIFACTS_BUCKET: ${{ steps.data.outputs.artifacts_bucket }}
+        run: |
+          set -euo pipefail
+
+          KEY="lambda/appointments/inventory-projector-${GITHUB_SHA}.zip"
+
+          aws s3 cp \
+            "$RUNNER_TEMP/appointments-inventory-projector.zip" \
+            "s3://${ARTIFACTS_BUCKET}/${KEY}"
+
+          echo "inventory_projector_key=${KEY}" >> "$GITHUB_OUTPUT"
+
       - name: Deploy appointments stack
         shell: bash
         env:
@@ -1441,6 +1477,7 @@ jobs:
           IDEMPOTENCY_TABLE: ${{ steps.data.outputs.idempotency_table }}
           APPOINTMENTS_API_KEY: ${{ steps.package.outputs.appointments_api_key }}
           OUTBOX_PUBLISHER_KEY: ${{ steps.outbox_package.outputs.outbox_publisher_key }}
+          INVENTORY_PROJECTOR_KEY: ${{ steps.inventory_projector_package.outputs.inventory_projector_key }}
         run: |
           set -euo pipefail
 
@@ -1458,6 +1495,7 @@ jobs:
               IdempotencyTableName="$IDEMPOTENCY_TABLE" \
               AppointmentsApiCodeKey="$APPOINTMENTS_API_KEY" \
               OutboxPublisherCodeKey="$OUTBOX_PUBLISHER_KEY" \
+              InventoryProjectorCodeKey="$INVENTORY_PROJECTOR_KEY" \
             --region "$REGION" \
             --capabilities CAPABILITY_NAMED_IAM \
             --no-fail-on-empty-changeset

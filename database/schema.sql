@@ -278,6 +278,8 @@ CREATE TABLE IF NOT EXISTS slots (
     end_at DATETIME NOT NULL,
     capacity SMALLINT UNSIGNED NOT NULL DEFAULT 1,
     booked_count SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+    active_hold_count SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+    inventory_version BIGINT UNSIGNED NOT NULL DEFAULT 0,
     status ENUM(
         'OPEN',
         'BLOCKED',
@@ -308,6 +310,11 @@ CREATE TABLE IF NOT EXISTS slots (
             AND booked_count <= capacity
         ),
 
+    CONSTRAINT chk_slots_inventory_capacity
+        CHECK (
+            booked_count + active_hold_count <= capacity
+        ),
+
     CONSTRAINT fk_slots_doctor
         FOREIGN KEY (doctor_id)
         REFERENCES doctors (doctor_id)
@@ -323,6 +330,45 @@ CREATE TABLE IF NOT EXISTS slots (
     CONSTRAINT fk_slots_availability_pattern
         FOREIGN KEY (pattern_id)
         REFERENCES doctor_availability_patterns (pattern_id)
+        ON UPDATE CASCADE
+        ON DELETE RESTRICT
+) ENGINE=InnoDB;
+
+-- 9A. SLOT INVENTORY OUTBOX
+CREATE TABLE IF NOT EXISTS slot_inventory_outbox (
+    inventory_event_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    slot_id BIGINT UNSIGNED NOT NULL,
+    slot_version BIGINT UNSIGNED NOT NULL,
+
+    status ENUM(
+        'PENDING',
+        'PROCESSING',
+        'APPLIED',
+        'FAILED'
+    ) NOT NULL DEFAULT 'PENDING',
+
+    attempts SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+    next_attempt_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    locked_until TIMESTAMP NULL,
+    applied_at TIMESTAMP NULL,
+    last_error TEXT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    PRIMARY KEY (inventory_event_id),
+
+    UNIQUE KEY uq_slot_inventory_version (
+        slot_id,
+        slot_version
+    ),
+
+    KEY idx_slot_inventory_dispatch (
+        status,
+        next_attempt_at
+    ),
+
+    CONSTRAINT fk_slot_inventory_outbox_slot
+        FOREIGN KEY (slot_id)
+        REFERENCES slots (slot_id)
         ON UPDATE CASCADE
         ON DELETE RESTRICT
 ) ENGINE=InnoDB;

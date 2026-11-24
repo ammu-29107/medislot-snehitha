@@ -47,6 +47,45 @@ def get_connection():
         autocommit=False,
     )
 
+def enqueue_slot_inventory(cursor, slot_id):
+    """Record a slot inventory change in the current SQL transaction."""
+    cursor.execute(
+        """
+        UPDATE slots
+        SET inventory_version = inventory_version + 1
+        WHERE slot_id = %s
+        """,
+        (slot_id,),
+    )
+
+    if cursor.rowcount != 1:
+        raise RuntimeError(
+            f"Could not increment inventory version for slot {slot_id}"
+        )
+
+    cursor.execute(
+        """
+        SELECT inventory_version
+        FROM slots
+        WHERE slot_id = %s
+        """,
+        (slot_id,),
+    )
+    row = cursor.fetchone()
+
+    if not row:
+        raise RuntimeError(
+            f"Could not read inventory version for slot {slot_id}"
+        )
+
+    cursor.execute(
+        """
+        INSERT INTO slot_inventory_outbox (slot_id, slot_version)
+        VALUES (%s, %s)
+        """,
+        (slot_id, int(row["inventory_version"])),
+    )
+
 
 def db_time_to_time(value):
     if isinstance(value, timedelta):
@@ -355,8 +394,11 @@ def handler(event, context):
                                     ),
                                 )
 
+                                slot_id = int(cursor.lastrowid)
+                                enqueue_slot_inventory(cursor, slot_id)
+
                                 inventory_slots.append({
-                                    "slot_id": cursor.lastrowid,
+                                    "slot_id": slot_id,
                                     "doctor_id": doctor_id,
                                     "consultation_type_id": pattern["consultation_type_id"],
                                     "start_at": slot_start,

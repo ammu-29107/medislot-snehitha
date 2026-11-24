@@ -11,6 +11,7 @@ from time import perf_counter
 from zoneinfo import ZoneInfo
 
 import requests
+from cachelib import FileSystemCache
 from flask import (
     Flask,
     flash,
@@ -48,11 +49,13 @@ session_directory.mkdir(parents=True, exist_ok=True)
 
 app.config.update(
     SECRET_KEY=secret_key,
-    SESSION_TYPE="filesystem",
-    SESSION_FILE_DIR=str(session_directory),
+    SESSION_TYPE="cachelib",
+    SESSION_CACHELIB=FileSystemCache(
+        str(session_directory),
+        threshold=500,
+        mode=0o600,
+    ),
     SESSION_PERMANENT=False,
-    SESSION_USE_SIGNER=True,
-    SESSION_FILE_THRESHOLD=500,
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
     SESSION_COOKIE_SECURE=os.environ.get("SESSION_COOKIE_SECURE", "false").lower()

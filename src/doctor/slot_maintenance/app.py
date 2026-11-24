@@ -42,6 +42,46 @@ def get_connection():
     )
 
 
+def enqueue_slot_inventory(cursor, slot_id):
+    """Record a slot inventory change in the current SQL transaction."""
+    cursor.execute(
+        """
+        UPDATE slots
+        SET inventory_version = inventory_version + 1
+        WHERE slot_id = %s
+        """,
+        (slot_id,),
+    )
+
+    if cursor.rowcount != 1:
+        raise RuntimeError(
+            f"Could not increment inventory version for slot {slot_id}"
+        )
+
+    cursor.execute(
+        """
+        SELECT inventory_version
+        FROM slots
+        WHERE slot_id = %s
+        """,
+        (slot_id,),
+    )
+    row = cursor.fetchone()
+
+    if not row:
+        raise RuntimeError(
+            f"Could not read inventory version for slot {slot_id}"
+        )
+
+    cursor.execute(
+        """
+        INSERT INTO slot_inventory_outbox (slot_id, slot_version)
+        VALUES (%s, %s)
+        """,
+        (slot_id, int(row["inventory_version"])),
+    )
+
+
 def handler(event, context):
     connection = None
 
@@ -58,6 +98,7 @@ def handler(event, context):
                 FROM slots
                 WHERE status = 'OPEN'
                   AND end_at <= %s
+                FOR UPDATE
                 """,
                 (now_ist,),
             )
@@ -78,6 +119,9 @@ def handler(event, context):
             )
 
             completed_count = cursor.rowcount
+
+            for slot_id in completed_slot_ids:
+                enqueue_slot_inventory(cursor, int(slot_id))
 
         connection.commit()
 

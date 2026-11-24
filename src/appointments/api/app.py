@@ -146,6 +146,48 @@ def outbox(cursor, aggregate_type, aggregate_id, event_type, payload):
     )
 
 
+def enqueue_slot_inventory(cursor, slot_id):
+    """Record the latest slot inventory version in the SQL transaction."""
+    cursor.execute(
+        """
+        UPDATE slots
+        SET inventory_version = inventory_version + 1
+        WHERE slot_id = %s
+        """,
+        (slot_id,),
+    )
+
+    if cursor.rowcount != 1:
+        raise RuntimeError(
+            f"Could not increment inventory version for slot {slot_id}"
+        )
+
+    cursor.execute(
+        """
+        SELECT inventory_version
+        FROM slots
+        WHERE slot_id = %s
+        """,
+        (slot_id,),
+    )
+    row = cursor.fetchone()
+
+    if not row:
+        raise RuntimeError(
+            f"Could not read inventory version for slot {slot_id}"
+        )
+
+    cursor.execute(
+        """
+        INSERT INTO slot_inventory_outbox (slot_id, slot_version)
+        VALUES (%s, %s)
+        """,
+        (slot_id, int(row["inventory_version"])),
+    )
+
+    return int(row["inventory_version"])
+
+
 def inventory_reserve(slot_id):
     try:
         inventory_table.update_item(
@@ -258,6 +300,26 @@ def fail_idempotency(key):
 
 def create_appointment(cursor, patient_id, slot_id):
     now = now_ist()
+
+    # Lock the patient row first to serialize concurrent booking attempts
+    # for the same patient. This protects the upcoming-appointment limit.
+    cursor.execute(
+        """
+        SELECT patient_id, status
+        FROM patients
+        WHERE patient_id = %s
+        FOR UPDATE
+        """,
+        (patient_id,),
+    )
+    patient = cursor.fetchone()
+
+    if not patient:
+        raise ApiError(404, "Patient was not found")
+
+    if patient["status"] != "ACTIVE":
+        raise ApiError(403, "Patient account is not active")
+
     cursor.execute(
         """
         SELECT
@@ -325,6 +387,7 @@ def create_appointment(cursor, patient_id, slot_id):
         "UPDATE slots SET booked_count = booked_count + 1 WHERE slot_id = %s",
         (slot_id,),
     )
+    enqueue_slot_inventory(cursor, slot_id)
     cursor.execute(
         """
         INSERT INTO appointment_status_history (
@@ -481,6 +544,7 @@ def cancel_appointment(cursor, appointment_id, actor_id, actor_role, reason):
         "UPDATE slots SET booked_count = GREATEST(booked_count - 1, 0) WHERE slot_id = %s",
         (row["slot_id"],),
     )
+    enqueue_slot_inventory(cursor, int(row["slot_id"]))
     cursor.execute(
         """
         INSERT INTO appointment_status_history (
@@ -625,6 +689,7 @@ def cancel_doctor_slot(cursor, slot_id, doctor_id, reason):
         "UPDATE slots SET status = 'CANCELLED', booked_count = 0 WHERE slot_id = %s",
         (slot_id,),
     )
+    enqueue_slot_inventory(cursor, int(slot_id))
     return cancelled
 
 
