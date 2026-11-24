@@ -372,8 +372,12 @@ def list_appointments(cursor, role, user_id, appointment_id=None):
             s.status AS slot_status, s.consultation_type_id,
             a.consultation_fee_snapshot AS consultation_fee,
             d.full_name AS doctor_name,
+            p.full_name AS patient_full_name,
+            p.phone_number AS patient_phone_number,
+            p.email AS patient_email,
             h.hospital_name, h.city
         FROM appointments a
+        INNER JOIN patients p ON p.patient_id = a.patient_id
         INNER JOIN slots s ON s.slot_id = a.slot_id
         INNER JOIN consultation_types ct
             ON ct.consultation_type_id = s.consultation_type_id
@@ -390,6 +394,20 @@ def list_appointments(cursor, role, user_id, appointment_id=None):
     rows = cursor.fetchall()
     if appointment_id is not None and not rows:
         raise ApiError(404, "Appointment not found")
+    if role == "DOCTOR":
+        for row in rows:
+            row["patient"] = {
+                "full_name": row.pop("patient_full_name", None),
+                "phone_number": row.pop("patient_phone_number", None),
+                "email": row.pop("patient_email", None),
+            }
+    else:
+        # Patient-facing responses only return their own appointments; omit
+        # contact fields that are not needed by the patient dashboard.
+        for row in rows:
+            row.pop("patient_full_name", None)
+            row.pop("patient_phone_number", None)
+            row.pop("patient_email", None)
     return rows
 
 

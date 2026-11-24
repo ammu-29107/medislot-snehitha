@@ -1,3 +1,4 @@
+
 {% extends "base.html" %}
 {% block title %}Patient Dashboard | MediSlot{% endblock %}
 {% set active_page = 'patient_dashboard' %}
@@ -50,8 +51,8 @@
                     </h1>
 
                     <p class="muted">
-                        Manage your profile and discover doctors,
-                        consultations and available appointment slots.
+                        Manage your appointments, profile and healthcare journey
+                        from one place.
                     </p>
                 </div>
 
@@ -62,6 +63,7 @@
 
             {% include "_flash_messages.html" %}
 
+            <!-- Patient Profile Statistics -->
             <div class="stats-grid">
 
                 <article class="stat-card">
@@ -118,6 +120,90 @@
 
             </div>
 
+            <!-- Appointments Section -->
+            <section class="panel">
+
+                <div class="panel-heading">
+                    <div>
+                        <h3>My appointments</h3>
+                        <p class="muted">
+                            View and manage your scheduled consultations
+                        </p>
+                    </div>
+
+                    <a
+                        href="/patient/appointments"
+                        class="text-link"
+                    >
+                        View all →
+                    </a>
+                </div>
+
+                {% set dashboard_appointments = appointments|default([], true) %}
+
+                {% if dashboard_appointments %}
+
+                    <div class="appointment-list">
+
+                        {% for appointment in dashboard_appointments[:3] %}
+
+                            <article class="action-link appointment-card">
+
+                                <span class="action-icon teal">◷</span>
+
+                                <span>
+                                    <strong>
+                                        {{ appointment.doctor_name
+                                            |default('Doctor', true) }}
+                                    </strong>
+
+                                    <small>
+                                        {{ appointment.start_at
+                                            |default(appointment.appointment_date
+                                            |default('Date unavailable', true), true) }}
+                                    </small>
+
+                                    <small>
+                                        {{ appointment.status
+                                            |default('Scheduled', true) }}
+                                    </small>
+                                </span>
+
+                                <span class="action-arrow">→</span>
+
+                            </article>
+
+                        {% endfor %}
+
+                    </div>
+
+                {% else %}
+
+                    <div class="empty-state">
+
+                        <div class="action-icon blue">◷</div>
+
+                        <h3>No appointments to display</h3>
+
+                        <p class="muted">
+                            Your appointments will appear here once you book
+                            a consultation.
+                        </p>
+
+                        <a
+                            href="{{ url_for('doctor_search') }}"
+                            class="text-link"
+                        >
+                            Find a doctor and book an appointment →
+                        </a>
+
+                    </div>
+
+                {% endif %}
+
+            </section>
+
+            <!-- Profile Overview and Quick Actions -->
             <div class="content-grid">
 
                 <section class="panel">
@@ -174,6 +260,7 @@
 
                 </section>
 
+
                 <section class="panel quick-panel">
 
                     <div class="panel-heading">
@@ -188,12 +275,10 @@
                         class="action-link"
                     >
                         <span class="action-icon teal">⌕</span>
-
                         <span>
                             <strong>Find a doctor</strong>
                             <small>Search doctors by name and speciality</small>
                         </span>
-
                         <span class="action-arrow">→</span>
                     </a>
 
@@ -202,12 +287,10 @@
                         class="action-link"
                     >
                         <span class="action-icon purple">♙</span>
-
                         <span>
                             <strong>My profile</strong>
                             <small>Update your personal information</small>
                         </span>
-
                         <span class="action-arrow">→</span>
                     </a>
 
@@ -216,12 +299,22 @@
                         class="action-link"
                     >
                         <span class="action-icon blue">◷</span>
-
                         <span>
                             <strong>Explore availability</strong>
                             <small>View doctors and available slots</small>
                         </span>
+                        <span class="action-arrow">→</span>
+                    </a>
 
+                    <a
+                        href="/patient/appointments"
+                        class="action-link"
+                    >
+                        <span class="action-icon orange">▣</span>
+                        <span>
+                            <strong>Manage appointments</strong>
+                            <small>Review, view and manage bookings</small>
+                        </span>
                         <span class="action-arrow">→</span>
                     </a>
 

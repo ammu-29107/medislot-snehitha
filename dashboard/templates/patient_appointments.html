@@ -1,0 +1,169 @@
+
+{% extends "base.html" %}
+{% block title %}My Appointments | MediSlot{% endblock %}
+{% set active_page = 'patient_appointments' %}
+
+{% block body %}
+<div class="app-layout patient-app-layout">
+
+    {% include "_patient_sidebar.html" %}
+
+    <main class="main-content">
+
+        <header class="topbar">
+            <button
+                class="menu-toggle"
+                id="menuToggle"
+                type="button"
+                aria-label="Toggle navigation"
+            >☰</button>
+
+            <div>
+                <span class="topbar-label">PATIENT PORTAL</span>
+                <h2>My Appointments</h2>
+            </div>
+
+            <a class="topbar-profile" href="{{ url_for('patient_dashboard') }}">
+                <span class="avatar">P</span>
+                <span>
+                    <strong>Patient Account</strong>
+                    <small>Appointment management</small>
+                </span>
+            </a>
+        </header>
+
+        <section class="page-content patient-page-content">
+
+            <div class="welcome-section">
+                <div>
+                    <p class="eyebrow">YOUR HEALTHCARE JOURNEY</p>
+                    <h1>My Appointments</h1>
+                    <p class="muted">
+                        View your appointment bookings and their current status.
+                    </p>
+                </div>
+
+                <a href="{{ url_for('doctor_search') }}" class="btn btn-primary">
+                    + Book Appointment
+                </a>
+            </div>
+
+            {% include "_flash_messages.html" %}
+
+            <section class="panel">
+
+                <div class="panel-heading">
+                    <div>
+                        <h3>Appointment History</h3>
+                        <p class="muted">
+                            Your bookings and appointment details
+                        </p>
+                    </div>
+
+                    <span class="count-chip">
+                        {{ appointments|length }} appointment(s)
+                    </span>
+                </div>
+
+                {% if appointments %}
+
+                    <div class="table-wrap">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Doctor</th>
+                                    <th>Date & Time</th>
+                                    <th>Booking Reference</th>
+                                    <th>Status</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+
+                            <tbody>
+                                {% for appointment in appointments %}
+                                <tr>
+                                    <td>
+                                        <strong>
+                                            Dr. {{ appointment.doctor_name|default('Doctor') }}
+                                        </strong>
+                                    </td>
+
+                                    <td>
+                                        {{ appointment.start_at|ist_datetime if appointment.start_at else appointment.appointment_date|default('Not available') }}
+                                    </td>
+
+                                    <td>
+                                        {{ appointment.booking_reference|default('—') }}
+                                    </td>
+
+                                    <td>
+                                        <span class="status-badge status-neutral">
+                                            {{ appointment.status|default('UNKNOWN')|replace('_', ' ')|title }}
+                                        </span>
+                                    </td>
+                                    <td class="appointment-actions-cell">
+                                        <a class="btn btn-secondary btn-small" href="{{ url_for('patient_appointment_detail', appointment_id=appointment.appointment_id) }}">Details</a>
+                                        {% if appointment.status == 'CONFIRMED' %}
+                                            <form method="POST" action="{{ url_for('patient_cancel_appointment', appointment_id=appointment.appointment_id) }}" onsubmit="return confirm('Cancel this appointment?');"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                                <button type="submit" class="btn btn-danger btn-small">Cancel</button>
+                                            </form>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+
+                {% else %}
+
+                    <div class="empty-state compact-empty">
+                        <div class="empty-icon">▤</div>
+                        <h4>No appointments yet</h4>
+                        <p>
+                            You haven't booked any appointments yet.
+                            Find a doctor and book your first consultation.
+                        </p>
+                        <a href="{{ url_for('doctor_search') }}" class="btn btn-primary">
+                            Find Doctors
+                        </a>
+                    </div>
+
+                {% endif %}
+
+            </section>
+
+            <section class="panel quick-panel">
+
+                <div class="panel-heading">
+                    <div>
+                        <h3>Quick Actions</h3>
+                        <p class="muted">Manage your healthcare</p>
+                    </div>
+                </div>
+
+                <a href="{{ url_for('doctor_search') }}" class="action-link">
+                    <span class="action-icon teal">⌕</span>
+                    <span>
+                        <strong>Find a doctor</strong>
+                        <small>Explore doctors and availability</small>
+                    </span>
+                    <span class="action-arrow">→</span>
+                </a>
+
+                <a href="{{ url_for('patient_dashboard') }}" class="action-link">
+                    <span class="action-icon blue">▦</span>
+                    <span>
+                        <strong>Back to dashboard</strong>
+                        <small>Return to your overview</small>
+                    </span>
+                    <span class="action-arrow">→</span>
+                </a>
+
+            </section>
+
+        </section>
+
+    </main>
+</div>
+{% endblock %}

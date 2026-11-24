@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Appointment Details | MediSlot{% endblock %}
+{% set active_page = 'patient_appointments' %}
+{% block body %}
+<div class="app-layout patient-app-layout">
+    {% include "_patient_sidebar.html" %}
+    <main class="main-content">
+        <header class="topbar">
+            <button class="menu-toggle" id="menuToggle" type="button" aria-label="Toggle navigation">☰</button>
+            <div><span class="topbar-label">PATIENT PORTAL</span><h2>Appointment Details</h2></div>
+            <a class="topbar-profile" href="{{ url_for('patient_dashboard') }}"><span class="avatar">P</span><span><strong>Patient Account</strong><small>Appointment details</small></span></a>
+        </header>
+        <section class="page-content patient-page-content">
+            <div class="welcome-section"><div><p class="eyebrow">BOOKING INFORMATION</p><h1>Appointment #{{ appointment.appointment_id }}</h1><p class="muted">Review the details of your booking.</p></div><a class="btn btn-secondary" href="{{ url_for('patient_appointments') }}">← All appointments</a></div>
+            {% include "_flash_messages.html" %}
+            <section class="panel appointment-detail-panel">
+                <div class="panel-heading"><h3>Appointment details</h3><span class="status-badge status-neutral">{{ appointment.status|default('UNKNOWN')|replace('_',' ')|title }}</span></div>
+                <dl class="appointment-detail-grid">
+                    <div><dt>Doctor</dt><dd>Dr. {{ appointment.doctor_name|default('Doctor') }}</dd></div>
+                    <div><dt>Booking reference</dt><dd>{{ appointment.booking_reference|default('—') }}</dd></div>
+                    <div><dt>Date &amp; time</dt><dd>{{ appointment.start_at|ist_datetime }}</dd></div>
+                    <div><dt>Consultation fee</dt><dd>₹{{ appointment.consultation_fee|default('0.00') }}</dd></div>
+                    <div><dt>Appointment status</dt><dd>{{ appointment.status|default('UNKNOWN')|replace('_',' ')|title }}</dd></div>
+                    {% if appointment.cancelled_at %}<div><dt>Cancelled at</dt><dd>{{ appointment.cancelled_at|ist_datetime }}</dd></div>{% endif %}
+                    {% if appointment.cancellation_reason %}<div><dt>Cancellation reason</dt><dd>{{ appointment.cancellation_reason }}</dd></div>{% endif %}
+                </dl>
+                {% if appointment.status == 'CONFIRMED' %}
+                    <form method="POST" action="{{ url_for('patient_cancel_appointment', appointment_id=appointment.appointment_id) }}" onsubmit="return confirm('Cancel this appointment?');"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="reason" value="Cancelled by patient"><button class="btn btn-danger" type="submit">Cancel appointment</button></form>
+                {% endif %}
+            </section>
+        </section>
+    </main>
+</div>
+{% endblock %}

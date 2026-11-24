@@ -18,6 +18,9 @@
         <a href="{{ url_for('availability') }}" class="nav-link{% if active_page == 'availability' %} active{% endif %}">
             <span class="nav-icon">◷</span><span>Availability</span>
         </a>
+        <a href="{{ url_for('doctor_appointments') }}" class="nav-link{% if active_page == 'doctor_appointments' %} active{% endif %}">
+            <span class="nav-icon">▤</span><span>Appointments</span>
+        </a>
         <a href="{{ url_for('schedule') }}" class="nav-link{% if active_page == 'schedule' %} active{% endif %}">
             <span class="nav-icon">▦</span><span>Schedule &amp; Slots</span>
         </a>

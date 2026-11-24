@@ -301,6 +301,20 @@
                                                         {% endif %}
                                                     </span>
 
+                                                    {% if slot.remaining_seats|int > 0 %}
+                                                        <form method="POST" action="{{ url_for('book_appointment') }}" class="slot-booking-form">
+                                                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                                            <input type="hidden" name="slot_id" value="{{ slot.slot_id }}">
+                                                            <input type="hidden" name="idempotency_key" value="{{ slot.booking_key }}">
+                                                            <input type="hidden" name="doctor_id" value="{{ doctor.doctor_id }}">
+                                                            <input type="hidden" name="selected_date" value="{{ selected_date }}">
+                                                            <input type="hidden" name="consultation_type_id" value="{{ consultation_type_id }}">
+                                                            <button class="btn btn-primary btn-small" type="submit" onclick="return confirm('Confirm booking this consultation slot?');">Book slot</button>
+                                                        </form>
+                                                    {% else %}
+                                                        <span class="slot-booking-unavailable">Fully booked</span>
+                                                    {% endif %}
+
                                                 </article>
 
                                             {% endfor %}
@@ -328,8 +342,7 @@
 
 
                     <p class="form-help">
-                        This page displays availability only.
-                        Appointment booking is not part of this milestone.
+                        Book an open slot above. Availability may change while you are booking.
                     </p>
 
                 </section>

@@ -2979,3 +2979,20 @@ input:disabled {
         grid-template-columns: 1fr;
     }
 }
+
+/* Milestone 5 appointment-management UI */
+.slot-booking-form, .ms-slot-cancel-form, .appointment-actions-cell form { margin-top: 0.5rem; }
+.slot-booking-form .btn, .ms-slot-cancel-form .btn, .appointment-actions-cell .btn { white-space: nowrap; }
+.slot-booking-unavailable { display: inline-block; margin-top: 0.5rem; color: var(--text-muted, #667085); font-size: 0.85rem; }
+.appointment-actions-cell { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; }
+.appointment-actions-cell form { margin: 0; }
+.appointment-management-list { display: grid; gap: 1rem; }
+.appointment-management-card { border: 1px solid var(--border-color, #e5e7eb); border-radius: 0.8rem; padding: 1rem; display: grid; gap: 0.8rem; }
+.appointment-management-main { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0.75rem; align-items: center; }
+.appointment-management-main h3 { margin: 0; }
+.appointment-management-details, .appointment-detail-grid { display: grid; gap: 0.75rem; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+.appointment-management-details span { overflow-wrap: anywhere; }
+.appointment-detail-grid { margin: 0 0 1.25rem; }
+.appointment-detail-grid div { border: 1px solid var(--border-color, #e5e7eb); border-radius: 0.6rem; padding: 0.8rem; }
+.appointment-detail-grid dt { color: var(--text-muted, #667085); font-size: 0.8rem; margin-bottom: 0.3rem; }
+.appointment-detail-grid dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }

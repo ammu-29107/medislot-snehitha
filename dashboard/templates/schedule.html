@@ -34,6 +34,14 @@
     {% else %}
         <div class="ms-event-empty">No confirmed appointment</div>
     {% endif %}
+    {% if slot.status == 'OPEN' %}
+        <form method="POST" action="{{ url_for('doctor_cancel_slot', slot_id=slot.slot_id) }}" class="ms-slot-cancel-form" onsubmit="return confirm('Cancel this slot and any appointments booked in it?');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="schedule_date" value="{{ selected_date }}">
+            <input type="hidden" name="calendar_view" value="{{ calendar_view }}">
+            <button class="btn btn-danger btn-small" type="submit">Cancel slot</button>
+        </form>
+    {% endif %}
 </article>
 {%- endmacro %}
 
@@ -174,7 +182,8 @@
                 </div>
                 {% if consultation_types %}
                     <form method="POST" action="{{ url_for('schedule') }}" class="form-grid">
-                        <input type="hidden" name="schedule_date" value="{{ selected_date }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="schedule_date" value="{{ selected_date }}">
                         <input type="hidden" name="calendar_view" value="{{ calendar_view }}">
                         <div class="form-group">
                             <label for="slot-consultation">Consultation type</label>

@@ -215,6 +215,20 @@ def patient_required(view):
     return wrapped
 
 
+def dashboard_csrf_token():
+    return session.setdefault(
+        "dashboard_csrf_token", secrets.token_urlsafe(32)
+    )
+
+
+def dashboard_csrf_valid():
+    submitted = request.form.get("csrf_token", "")
+    expected = session.get("dashboard_csrf_token", "")
+    return bool(
+        submitted and expected and hmac.compare_digest(submitted, expected)
+    )
+
+
 def get_active_consultation_types():
     data, status = call_doctor_api("GET", "/doctor/consultation-types")
     if status != 200:
@@ -435,14 +449,158 @@ def register(role):
     return _render_registration(role, request.form)
 
 
+
 @app.route("/patient/dashboard")
 @patient_required
 def patient_dashboard():
-    profile_data, profile_status = call_doctor_api("GET", "/patient/profile")
-    profile = profile_data.get("profile", {}) if profile_status == 200 else {}
+    profile_data, profile_status = call_doctor_api(
+        "GET", "/patient/profile"
+    )
+
+    profile = (
+        profile_data.get("profile", {})
+        if profile_status == 200
+        else {}
+    )
+
     if profile_status != 200:
-        flash(profile_data.get("message", "Unable to load your patient profile."), "error")
-    return render_template("patient_dashboard.html", profile=profile, active_page="patient_dashboard")
+        flash(
+            profile_data.get(
+                "message",
+                "Unable to load your patient profile."
+            ),
+            "error",
+        )
+
+    appointments_data, appointments_status = call_doctor_api(
+        "GET", "/patients/me/appointments"
+    )
+
+    appointments = (
+        appointments_data.get("appointments", [])
+        if appointments_status == 200
+        else []
+    )
+
+    if appointments_status != 200:
+        flash(
+            appointments_data.get(
+                "message",
+                "Unable to load your appointments."
+            ),
+            "warning",
+        )
+
+    return render_template(
+        "patient_dashboard.html",
+        profile=profile,
+        appointments=appointments,
+        active_page="patient_dashboard",
+    )
+
+
+@app.route("/patient/appointments")
+@patient_required
+def patient_appointments():
+    data, status = call_doctor_api(
+        "GET", "/patients/me/appointments"
+    )
+
+    appointments = (
+        data.get("appointments", [])
+        if status == 200
+        else []
+    )
+
+    if status != 200:
+        flash(
+            data.get(
+                "message",
+                "Unable to load your appointments."
+            ),
+            "error",
+        )
+
+    return render_template(
+        "patient_appointments.html",
+        appointments=appointments,
+        csrf_token=dashboard_csrf_token(),
+        active_page="patient_appointments",
+    )
+
+
+@app.route("/patient/appointments/<int:appointment_id>")
+@patient_required
+def patient_appointment_detail(appointment_id):
+    data, status = call_doctor_api(
+        "GET", f"/patients/me/appointments/{appointment_id}"
+    )
+    if status != 200:
+        flash(data.get("message", "Unable to load appointment details."), "error")
+        return redirect(url_for("patient_appointments"))
+    return render_template(
+        "patient_appointment_detail.html",
+        appointment=data.get("appointment", {}),
+        csrf_token=dashboard_csrf_token(),
+        active_page="patient_appointments",
+    )
+
+
+@app.route("/patient/appointments/<int:appointment_id>/cancel", methods=["POST"])
+@patient_required
+def patient_cancel_appointment(appointment_id):
+    if not dashboard_csrf_valid():
+        flash("Your request could not be verified. Refresh the page and try again.", "error")
+        return redirect(url_for("patient_appointments"))
+    reason = request.form.get("reason", "Cancelled by patient").strip() or "Cancelled by patient"
+    data, status = call_doctor_api(
+        "POST", f"/appointments/{appointment_id}/cancel", json={"reason": reason}
+    )
+    if status == 200:
+        flash("Appointment cancelled successfully.", "success")
+    else:
+        flash(data.get("message", "Unable to cancel appointment."), "error")
+    return redirect(url_for("patient_appointments"))
+
+
+@app.route("/appointments/book", methods=["POST"])
+@patient_required
+def book_appointment():
+    if not dashboard_csrf_valid():
+        flash("Your request could not be verified. Refresh the page and try again.", "error")
+        return redirect(url_for("doctor_search"))
+    slot_id = request.form.get("slot_id", "").strip()
+    doctor_id = request.form.get("doctor_id", "").strip()
+    selected_date = request.form.get("selected_date", "").strip()
+    consultation_type_id = request.form.get("consultation_type_id", "").strip()
+    if not slot_id.isdigit():
+        flash("Choose a valid appointment slot.", "error")
+        return redirect(url_for("doctor_search"))
+    idempotency_key = request.form.get("idempotency_key", "").strip()
+    if not idempotency_key or len(idempotency_key) > 128:
+        flash("The booking form expired. Please refresh and try again.", "warning")
+        return redirect(url_for(
+            "doctor_detail", doctor_id=doctor_id or 0,
+            selected_date=selected_date or None,
+            consultation_type_id=consultation_type_id or None,
+        ))
+    data, status = call_doctor_api(
+        "POST", "/appointments", json={"slot_id": int(slot_id)},
+        headers={"Idempotency-Key": idempotency_key},
+    )
+    if status in (200, 201):
+        reference = data.get("booking_reference")
+        flash(
+            f"Appointment booked successfully{f' (reference: {reference})' if reference else ''}.",
+            "success",
+        )
+        return redirect(url_for("patient_appointments"))
+    flash(data.get("message", "Unable to book this slot. It may no longer be available."), "error")
+    return redirect(url_for(
+        "doctor_detail", doctor_id=doctor_id or 0,
+        selected_date=selected_date or None,
+        consultation_type_id=consultation_type_id or None,
+    ))
 
 
 @app.route("/patient/profile", methods=["GET", "POST"])
@@ -556,6 +714,57 @@ def deactivate_patient_account():
     return redirect(url_for("patient_profile"))
 
 
+@app.route("/doctor/appointments")
+@doctor_required
+def doctor_appointments():
+    data, status = call_doctor_api("GET", "/doctors/me/appointments")
+    appointments = data.get("appointments", []) if status == 200 else []
+    if status != 200:
+        flash(data.get("message", "Unable to load appointments."), "error")
+    return render_template(
+        "doctor_appointments.html",
+        appointments=appointments,
+        csrf_token=dashboard_csrf_token(),
+        active_page="doctor_appointments",
+    )
+
+
+@app.route("/doctor/appointments/<int:appointment_id>/cancel", methods=["POST"])
+@doctor_required
+def doctor_cancel_appointment(appointment_id):
+    if not dashboard_csrf_valid():
+        flash("Your request could not be verified. Refresh the page and try again.", "error")
+        return redirect(url_for("doctor_appointments"))
+    reason = request.form.get("reason", "Cancelled by doctor").strip() or "Cancelled by doctor"
+    data, status = call_doctor_api(
+        "POST", f"/appointments/{appointment_id}/cancel", json={"reason": reason}
+    )
+    if status == 200:
+        flash("Appointment cancelled.", "success")
+    else:
+        flash(data.get("message", "Unable to cancel appointment."), "error")
+    return redirect(url_for("doctor_appointments"))
+
+
+@app.route("/doctor/slots/<int:slot_id>/cancel", methods=["POST"])
+@doctor_required
+def doctor_cancel_slot(slot_id):
+    if not dashboard_csrf_valid():
+        flash("Your request could not be verified. Refresh the page and try again.", "error")
+        return redirect(url_for("schedule"))
+    reason = request.form.get("reason", "Slot cancelled by doctor").strip() or "Slot cancelled by doctor"
+    data, status = call_doctor_api(
+        "POST", f"/doctors/me/slots/{slot_id}/cancel", json={"reason": reason}
+    )
+    if status == 200:
+        count = data.get("count", data.get("appointments_cancelled", 0))
+        flash(f"Slot cancelled. {count} appointment(s) affected.", "success")
+    else:
+        flash(data.get("message", "Unable to cancel slot."), "error")
+    return redirect(url_for("schedule", date=request.form.get("schedule_date") or None,
+                          view=request.form.get("calendar_view") or None))
+
+
 @app.route("/doctors")
 @patient_required
 def doctor_search():
@@ -625,6 +834,8 @@ def doctor_detail(doctor_id):
     )
 
     slots = slots_data.get("slots", []) if slots_status == 200 else []
+    for slot in slots:
+        slot["booking_key"] = secrets.token_urlsafe(24)
 
     if slots_status != 200:
         flash(
@@ -676,6 +887,7 @@ def doctor_detail(doctor_id):
         next_date=next_date,
         today=today_iso,
         consultation_type_id=consultation_type_id,
+        csrf_token=dashboard_csrf_token(),
         active_page="doctor_search",
     )
 
@@ -1162,6 +1374,7 @@ def schedule():
         slots=slots,
         consultation_types=consultation_types,
         schedule_loaded=api_status == 200,
+        csrf_token=dashboard_csrf_token(),
         active_page="schedule",
     )
 
