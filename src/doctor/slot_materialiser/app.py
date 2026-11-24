@@ -387,7 +387,7 @@ def handler(event, context):
 
                 inventory_slots.clear()
 
-        inventory_sync = sync_all_slot_inventory(cursor)
+            inventory_sync = sync_all_slot_inventory(cursor)
 
         result = {
             "message": "Slot materialisation completed",
