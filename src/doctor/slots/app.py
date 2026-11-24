@@ -4,6 +4,7 @@ import json
 import logging
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
+from common.slot_inventory import sync_slot, update_slot_status
 from zoneinfo import ZoneInfo
 
 import boto3
@@ -225,7 +226,18 @@ def create_slot(cursor, doctor_id, data):
         ),
     )
 
-    return cursor.lastrowid, end_at
+    slot_id = cursor.lastrowid
+
+    return {
+        "slot_id": slot_id,
+        "doctor_id": doctor_id,
+        "consultation_type_id": consultation_type_id,
+        "start_at": start_at,
+        "end_at": end_at,
+        "capacity": int(consultation["capacity"]),
+        "booked_count": 0,
+        "status": "OPEN",
+    }
 
 
 def list_slots(cursor, doctor_id, query):
@@ -342,7 +354,14 @@ def create_blackout(cursor, doctor_id, data):
         (doctor_id, end_at, start_at),
     )
 
-    return blackout_id, cursor.rowcount
+    return (
+        blackout_id,
+        cursor.rowcount,
+        [
+            str(slot["slot_id"])
+            for slot in affected_slots
+        ],
+    )
 
 
 def list_blackouts(cursor, doctor_id):
@@ -405,16 +424,17 @@ def handler(event, context):
 
             if is_slot_route and method == "POST":
                 data = get_body(event)
-                slot_id, end_at = create_slot(
-                    cursor, doctor_id, data
-                )
+                slot = create_slot(cursor, doctor_id, data)
                 connection.commit()
+
+                sync_result = sync_slot(slot)
 
                 return response(201, {
                     "message": "Slot created",
-                    "slot_id": slot_id,
-                    "end_at": end_at,
+                    "slot_id": slot["slot_id"],
+                    "end_at": slot["end_at"],
                     "status": "OPEN",
+                    "inventory_sync": sync_result,
                 })
 
             if is_blackout_route and method == "GET":
@@ -424,10 +444,13 @@ def handler(event, context):
 
             if is_blackout_route and method == "POST":
                 data = get_body(event)
-                blackout_id, blocked_count = create_blackout(
-                    cursor, doctor_id, data
+                blackout_id, blocked_count, blocked_slot_ids = (
+                    create_blackout(cursor, doctor_id, data)
                 )
                 connection.commit()
+
+                for slot_id in blocked_slot_ids:
+                    update_slot_status(slot_id, "BLOCKED")
 
                 return response(201, {
                     "message": "Blackout created",

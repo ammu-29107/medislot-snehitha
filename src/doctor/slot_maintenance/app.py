@@ -4,6 +4,7 @@ import json
 import logging
 from datetime import datetime
 from zoneinfo import ZoneInfo
+from common.slot_inventory import update_slot_status
 
 import boto3
 import pymysql
@@ -53,6 +54,21 @@ def handler(event, context):
         with connection.cursor() as cursor:
             cursor.execute(
                 """
+                SELECT slot_id
+                FROM slots
+                WHERE status = 'OPEN'
+                  AND end_at <= %s
+                """,
+                (now_ist,),
+            )
+
+            completed_slot_ids = [
+                str(row["slot_id"])
+                for row in cursor.fetchall()
+            ]
+
+            cursor.execute(
+                """
                 UPDATE slots s
                 SET s.status = 'COMPLETED'
                 WHERE s.status = 'OPEN'
@@ -64,6 +80,9 @@ def handler(event, context):
             completed_count = cursor.rowcount
 
         connection.commit()
+
+        for slot_id in completed_slot_ids:
+            update_slot_status(slot_id, "COMPLETED")
 
         logger.info(
             "Slot maintenance completed. Updated %s slots.",

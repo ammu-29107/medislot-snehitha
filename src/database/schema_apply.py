@@ -1,3 +1,4 @@
+
 import logging
 import os
 from pathlib import Path
@@ -109,6 +110,77 @@ def ensure_patient_domain_schema(cursor):
     return changes
 
 
+def ensure_appointments_schema(cursor):
+    """
+    Add and backfill the consultation fee snapshot.
+
+    Existing appointments receive the consultation fee associated
+    with their slot. New bookings will populate this column directly.
+    """
+    changes = 0
+
+    cursor.execute(
+        """
+        SELECT COUNT(*)
+        FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME = 'appointments'
+          AND COLUMN_NAME = 'consultation_fee_snapshot'
+        """
+    )
+
+    column_exists = cursor.fetchone()[0] > 0
+
+    if not column_exists:
+        cursor.execute(
+            """
+            ALTER TABLE appointments
+            ADD COLUMN consultation_fee_snapshot DECIMAL(10,2) NULL
+            AFTER slot_id
+            """
+        )
+        changes += 1
+
+    cursor.execute(
+        """
+        UPDATE appointments a
+        INNER JOIN slots sl
+            ON sl.slot_id = a.slot_id
+        INNER JOIN consultation_types ct
+            ON ct.consultation_type_id = sl.consultation_type_id
+        SET a.consultation_fee_snapshot = ct.consultation_fee
+        WHERE a.consultation_fee_snapshot IS NULL
+        """
+    )
+    changes += max(cursor.rowcount, 0)
+
+    cursor.execute(
+        """
+        SELECT COUNT(*)
+        FROM appointments
+        WHERE consultation_fee_snapshot IS NULL
+        """
+    )
+
+    missing_fees = cursor.fetchone()[0]
+
+    if missing_fees:
+        raise RuntimeError(
+            f"{missing_fees} appointments have no consultation fee "
+            "snapshot. The migration was stopped rather than "
+            "assigning an incorrect refund amount."
+        )
+
+    cursor.execute(
+        """
+        ALTER TABLE appointments
+        MODIFY COLUMN consultation_fee_snapshot DECIMAL(10,2) NOT NULL
+        """
+    )
+
+    return changes
+
+
 def handler(event, context):
     """Apply the MediSlot schema and idempotent reference-data seed."""
 
@@ -145,16 +217,31 @@ def handler(event, context):
     try:
         with connection.cursor() as cursor:
             schema_statements = execute_sql_file(cursor, schema_path)
-            migration_changes = ensure_patient_domain_schema(cursor)
+
+            patient_migration_changes = (
+                ensure_patient_domain_schema(cursor)
+            )
+            appointment_migration_changes = (
+                ensure_appointments_schema(cursor)
+            )
+
             seed_statements = execute_sql_file(cursor, seed_path)
+
+        migration_changes = (
+            patient_migration_changes
+            + appointment_migration_changes
+        )
 
         logger.info(
             "Schema and reference data applied successfully to '%s'. "
-            "schema_statements=%s seed_statements=%s migration_changes=%s",
+            "schema_statements=%s seed_statements=%s "
+            "patient_migration_changes=%s "
+            "appointment_migration_changes=%s",
             db_name,
             schema_statements,
             seed_statements,
-            migration_changes,
+            patient_migration_changes,
+            appointment_migration_changes,
         )
 
         return {
@@ -162,6 +249,10 @@ def handler(event, context):
             "database": db_name,
             "schema_statements_executed": schema_statements,
             "seed_statements_executed": seed_statements,
+            "patient_migration_changes": patient_migration_changes,
+            "appointment_migration_changes": (
+                appointment_migration_changes
+            ),
             "migration_changes": migration_changes,
         }
     finally:

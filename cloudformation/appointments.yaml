@@ -1,0 +1,252 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: MediSlot appointment booking, retrieval and cancellation APIs
+
+Parameters:
+  ProjectName:
+    Type: String
+
+  Environment:
+    Type: String
+
+  NetworkStackName:
+    Type: String
+
+  ArtifactsBucketName:
+    Type: String
+
+  DatabaseHost:
+    Type: String
+
+  DatabaseUsername:
+    Type: String
+
+  SlotInventoryTableName:
+    Type: String
+    Description: Existing DynamoDB slot inventory table
+
+  IdempotencyTableName:
+    Type: String
+    Description: Existing DynamoDB idempotency keys table
+
+  AppointmentsApiCodeKey:
+    Type: String
+    Description: S3 key for the packaged appointment API Lambda
+
+Resources:
+
+  # --------------------------------------------------
+  # APPOINTMENT LAMBDA EXECUTION ROLE
+  # --------------------------------------------------
+
+  AppointmentsExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectName}-${Environment}-appointments-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole'
+
+      Policies:
+        - PolicyName: AppointmentsRuntimeAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+
+              - Sid: ReadDatabasePassword
+                Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${ProjectName}/${Environment}/database/password'
+
+              - Sid: ManageSlotInventory
+                Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${SlotInventoryTableName}'
+
+              - Sid: ManageIdempotencyRecords
+                Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${IdempotencyTableName}'
+
+  # --------------------------------------------------
+  # APPOINTMENT API LAMBDA
+  # --------------------------------------------------
+
+  AppointmentsFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${ProjectName}-${Environment}-appointments'
+      Runtime: python3.12
+      Handler: app.handler
+      Role: !GetAtt AppointmentsExecutionRole.Arn
+      Timeout: 29
+      MemorySize: 512
+
+      Code:
+        S3Bucket: !Ref ArtifactsBucketName
+        S3Key: !Ref AppointmentsApiCodeKey
+
+      VpcConfig:
+        SecurityGroupIds:
+          - Fn::ImportValue:
+              Fn::Sub: '${NetworkStackName}-LambdaSecurityGroupId'
+        SubnetIds:
+          - Fn::ImportValue:
+              Fn::Sub: '${NetworkStackName}-PrivateSubnetAId'
+          - Fn::ImportValue:
+              Fn::Sub: '${NetworkStackName}-PrivateSubnetBId'
+
+      Environment:
+        Variables:
+          DB_HOST: !Ref DatabaseHost
+          DB_PORT: '3306'
+          DB_NAME: medislot
+          DB_USER: !Ref DatabaseUsername
+          DB_PASSWORD_PARAMETER: !Sub '/${ProjectName}/${Environment}/database/password'
+
+          SLOT_INVENTORY_TABLE: !Ref SlotInventoryTableName
+          IDEMPOTENCY_TABLE: !Ref IdempotencyTableName
+
+          LOG_LEVEL: INFO
+
+  # --------------------------------------------------
+  # EXISTING HTTP API INTEGRATION
+  # --------------------------------------------------
+
+  AppointmentsIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId:
+        Fn::ImportValue:
+          Fn::Sub: '${ProjectName}-${Environment}-AuthApiId'
+      IntegrationType: AWS_PROXY
+      IntegrationMethod: POST
+      IntegrationUri: !GetAtt AppointmentsFunction.Arn
+      PayloadFormatVersion: '2.0'
+      TimeoutInMillis: 29000
+
+  AppointmentsInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref AppointmentsFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub
+        - 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiId}/*/*'
+        - ApiId:
+            Fn::ImportValue:
+              Fn::Sub: '${ProjectName}-${Environment}-AuthApiId'
+
+  # --------------------------------------------------
+  # PATIENT APPOINTMENT ROUTES
+  # --------------------------------------------------
+
+  BookAppointmentRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId:
+        Fn::ImportValue:
+          Fn::Sub: '${ProjectName}-${Environment}-AuthApiId'
+      RouteKey: 'POST /appointments'
+      AuthorizationType: CUSTOM
+      AuthorizerId:
+        Fn::ImportValue:
+          Fn::Sub: '${ProjectName}-${Environment}-AuthAuthorizerId'
+      Target: !Sub 'integrations/${AppointmentsIntegration}'
+
+  PatientAppointmentsGetRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId:
+        Fn::ImportValue:
+          Fn::Sub: '${ProjectName}-${Environment}-AuthApiId'
+      RouteKey: 'GET /patients/me/appointments'
+      AuthorizationType: CUSTOM
+      AuthorizerId:
+        Fn::ImportValue:
+          Fn::Sub: '${ProjectName}-${Environment}-AuthAuthorizerId'
+      Target: !Sub 'integrations/${AppointmentsIntegration}'
+
+  PatientAppointmentDetailsRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId:
+        Fn::ImportValue:
+          Fn::Sub: '${ProjectName}-${Environment}-AuthApiId'
+      RouteKey: 'GET /patients/me/appointments/{appointmentId}'
+      AuthorizationType: CUSTOM
+      AuthorizerId:
+        Fn::ImportValue:
+          Fn::Sub: '${ProjectName}-${Environment}-AuthAuthorizerId'
+      Target: !Sub 'integrations/${AppointmentsIntegration}'
+
+  CancelAppointmentRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId:
+        Fn::ImportValue:
+          Fn::Sub: '${ProjectName}-${Environment}-AuthApiId'
+      RouteKey: 'POST /appointments/{appointmentId}/cancel'
+      AuthorizationType: CUSTOM
+      AuthorizerId:
+        Fn::ImportValue:
+          Fn::Sub: '${ProjectName}-${Environment}-AuthAuthorizerId'
+      Target: !Sub 'integrations/${AppointmentsIntegration}'
+
+  # --------------------------------------------------
+  # DOCTOR APPOINTMENT ROUTES
+  # --------------------------------------------------
+
+  DoctorAppointmentsGetRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId:
+        Fn::ImportValue:
+          Fn::Sub: '${ProjectName}-${Environment}-AuthApiId'
+      RouteKey: 'GET /doctors/me/appointments'
+      AuthorizationType: CUSTOM
+      AuthorizerId:
+        Fn::ImportValue:
+          Fn::Sub: '${ProjectName}-${Environment}-AuthAuthorizerId'
+      Target: !Sub 'integrations/${AppointmentsIntegration}'
+
+  DoctorCancelSlotRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId:
+        Fn::ImportValue:
+          Fn::Sub: '${ProjectName}-${Environment}-AuthApiId'
+      RouteKey: 'POST /doctors/me/slots/{slotId}/cancel'
+      AuthorizationType: CUSTOM
+      AuthorizerId:
+        Fn::ImportValue:
+          Fn::Sub: '${ProjectName}-${Environment}-AuthAuthorizerId'
+      Target: !Sub 'integrations/${AppointmentsIntegration}'
+
+Outputs:
+
+  AppointmentsFunctionName:
+    Description: Appointment API Lambda function name
+    Value: !Ref AppointmentsFunction
+
+  AppointmentsIntegrationId:
+    Description: API Gateway integration for appointment routes
+    Value: !Ref AppointmentsIntegration
