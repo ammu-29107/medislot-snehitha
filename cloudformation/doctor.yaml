@@ -85,6 +85,11 @@ Resources:
               - Effect: Allow
                 Action: ssm:GetParameter
                 Resource: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${ProjectName}/${Environment}/database/password'
+              - Effect: Allow
+                Action:
+                  - dynamodb:DeleteItem
+                  - dynamodb:BatchWriteItem
+                Resource: !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ProjectName}-${Environment}-slot-inventory'
 
   SchedulingExecutionRole:
     Type: AWS::IAM::Role
@@ -152,7 +157,9 @@ Resources:
             Statement:
               - Effect: Allow
                 Action: ssm:GetParameter
-                Resource: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${ProjectName}/${Environment}/database/password'
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${ProjectName}/${Environment}/database/password'
+                  - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${ProjectName}/${Environment}/scheduling/slot-window-days'
 
   SlotMaintenanceExecutionRole:
     Type: AWS::IAM::Role
@@ -250,7 +257,7 @@ Resources:
       Runtime: python3.12
       Handler: app.handler
       Role: !GetAtt ConsultationTypesExecutionRole.Arn
-      Timeout: 15
+      Timeout: 30
       MemorySize: 256
       Code:
         S3Bucket: !Ref ArtifactsBucketName
@@ -271,6 +278,7 @@ Resources:
           DB_NAME: medislot
           DB_USER: !Ref DatabaseUsername
           DB_PASSWORD_PARAMETER: !Sub '/${ProjectName}/${Environment}/database/password'
+          SLOT_INVENTORY_TABLE: !Sub '${ProjectName}-${Environment}-slot-inventory'
           LOG_LEVEL: INFO
 
   SchedulingFunction:
@@ -311,8 +319,8 @@ Resources:
       Runtime: python3.12
       Handler: app.handler
       Role: !GetAtt AvailabilityExecutionRole.Arn
-      Timeout: 20
-      MemorySize: 256
+      Timeout: 60
+      MemorySize: 512
       Code:
         S3Bucket: !Ref ArtifactsBucketName
         S3Key: !Ref AvailabilityCodeKey
@@ -332,6 +340,7 @@ Resources:
           DB_NAME: medislot
           DB_USER: !Ref DatabaseUsername
           DB_PASSWORD_PARAMETER: !Sub '/${ProjectName}/${Environment}/database/password'
+          SLOT_WINDOW_DAYS_PARAMETER: !Sub '/${ProjectName}/${Environment}/scheduling/slot-window-days'
           LOG_LEVEL: INFO
 
   DayViewFunction:
@@ -394,6 +403,7 @@ Resources:
           DB_PASSWORD_PARAMETER: !Sub '/${ProjectName}/${Environment}/database/password'
           LOG_LEVEL: INFO
           SLOT_INVENTORY_TABLE: !Sub '${ProjectName}-${Environment}-slot-inventory'
+          NO_SHOW_GRACE_MINUTES: '15'
 
   SlotMaterialiserFunction:
     Type: AWS::Lambda::Function
@@ -796,9 +806,9 @@ Resources:
     Type: AWS::Scheduler::Schedule
     Properties:
       Name: !Sub '${ProjectName}-${Environment}-slot-maintenance'
-      Description: Periodically updates expired doctor slots
+      Description: Marks ended slots complete and confirmed appointments no-show after the attendance grace period
       State: ENABLED
-      ScheduleExpression: rate(1 hour)
+      ScheduleExpression: rate(5 minutes)
       FlexibleTimeWindow:
         Mode: 'OFF'
       Target:

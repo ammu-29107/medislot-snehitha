@@ -200,57 +200,34 @@
                     </form>
                 </div>
 
-                <!-- Account Deactivation Section -->
-                <div class="patient-danger-zone">
-
+                <!-- Account deactivation: this preserves appointment history. -->
+                <section class="patient-danger-zone" aria-labelledby="patient-deactivation-title">
                     <div class="patient-danger-content">
                         <p class="eyebrow">ACCOUNT MANAGEMENT</p>
-
-                        <h3>Delete Account</h3>
-
-                        <p>
-                            You can deactivate your MediSlot patient
-                            account when you no longer need it.
-                        </p>
-
-                        <p>
-                            For your safety, account deletion is not
-                            permitted while you have active appointments.
-                            Please complete or cancel those appointments
-                            before proceeding.
-                        </p>
-
-                        <p>
-                            Once your account is deactivated, you will
-                            be signed out and will no longer be able
-                            to access your patient account.
-                        </p>
+                        <h3 id="patient-deactivation-title">Deactivate account</h3>
+                        <p>Deactivating your account signs you out and prevents future sign-ins. Your appointment and refund history is retained for record-keeping; this is not a permanent deletion of database records.</p>
+                        <ul class="patient-deactivation-points">
+                            <li>You cannot deactivate while you have an appointment that has not yet ended.</li>
+                            <li>You can review your appointment history before proceeding.</li>
+                            <li>Your current login session is revoked when deactivation succeeds.</li>
+                        </ul>
                     </div>
+                    <button type="button" class="btn patient-delete-button" id="openPatientDeactivation">Deactivate my account</button>
+                </section>
 
-                    <form
-                        method="POST"
-                        action="{{ url_for('deactivate_patient_account') }}"
-                        onsubmit="return confirm(
-                            'Are you sure you want to deactivate your MediSlot patient account?'
-                        );"
-                    >
-
-                        <input
-                            type="hidden"
-                            name="csrf_token"
-                            value="{{ csrf_token }}"
-                        >
-
-                        <button
-                            type="submit"
-                            class="btn patient-delete-button"
-                        >
-                            Delete My Account
-                        </button>
-
-                    </form>
-
-                </div>
+                <dialog class="patient-deactivation-dialog" id="patientDeactivationDialog" aria-labelledby="patientDeactivationDialogTitle" aria-describedby="patientDeactivationDialogDescription">
+                    <div class="patient-deactivation-dialog-content">
+                        <span class="patient-deactivation-icon" aria-hidden="true">!</span>
+                        <p class="eyebrow">FINAL CONFIRMATION</p>
+                        <h3 id="patientDeactivationDialogTitle">Deactivate your MediSlot account?</h3>
+                        <p id="patientDeactivationDialogDescription">You will be signed out and will no longer be able to sign in. Your appointment history will be retained. This action cannot be undone from the patient portal.</p>
+                        <form method="POST" action="{{ url_for('deactivate_patient_account') }}" class="patient-deactivation-actions">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                            <button type="button" class="btn btn-secondary" id="cancelPatientDeactivation">Keep my account</button>
+                            <button type="submit" class="btn patient-delete-button">Yes, deactivate account</button>
+                        </form>
+                    </div>
+                </dialog>
             </section>
         </section>
     </main>

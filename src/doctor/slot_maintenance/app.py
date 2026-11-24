@@ -2,7 +2,8 @@
 import os
 import json
 import logging
-from datetime import datetime
+import uuid
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import boto3
@@ -19,6 +20,7 @@ DB_USER = os.environ["DB_USER"]
 DB_PASSWORD_PARAMETER = os.environ["DB_PASSWORD_PARAMETER"]
 
 IST = ZoneInfo("Asia/Kolkata")
+NO_SHOW_GRACE_MINUTES = max(0, int(os.getenv("NO_SHOW_GRACE_MINUTES", "15")))
 
 
 def get_connection():
@@ -81,6 +83,24 @@ def enqueue_slot_inventory(cursor, slot_id):
     )
 
 
+def enqueue_appointment_event(cursor, appointment_id, event_type, payload):
+    cursor.execute(
+        """
+        INSERT INTO outbox_events (
+            event_uuid, aggregate_type, aggregate_id,
+            event_type, payload, status
+        )
+        VALUES (%s, 'APPOINTMENT', %s, %s, %s, 'PENDING')
+        """,
+        (
+            str(uuid.uuid4()),
+            str(appointment_id),
+            event_type,
+            json.dumps(payload, default=str),
+        ),
+    )
+
+
 def handler(event, context):
     connection = None
 
@@ -91,6 +111,62 @@ def handler(event, context):
         connection = get_connection()
 
         with connection.cursor() as cursor:
+            no_show_cutoff = now_ist - timedelta(
+                minutes=NO_SHOW_GRACE_MINUTES
+            )
+            cursor.execute(
+                """
+                SELECT a.appointment_id, a.patient_id, a.slot_id, s.doctor_id
+                FROM appointments a
+                INNER JOIN slots s ON s.slot_id = a.slot_id
+                WHERE a.status = 'CONFIRMED'
+                  AND s.end_at <= %s
+                ORDER BY a.appointment_id
+                FOR UPDATE
+                """,
+                (no_show_cutoff,),
+            )
+            no_show_rows = cursor.fetchall()
+            no_show_count = 0
+            for appointment in no_show_rows:
+                cursor.execute(
+                    """
+                    UPDATE appointments
+                    SET status = 'NO_SHOW'
+                    WHERE appointment_id = %s AND status = 'CONFIRMED'
+                    """,
+                    (appointment["appointment_id"],),
+                )
+                if cursor.rowcount != 1:
+                    continue
+                cursor.execute(
+                    """
+                    INSERT INTO appointment_status_history (
+                        appointment_id, previous_status, new_status,
+                        changed_by_role, changed_by_id, reason
+                    )
+                    VALUES (%s, 'CONFIRMED', 'NO_SHOW', 'SYSTEM', NULL, %s)
+                    """,
+                    (
+                        appointment["appointment_id"],
+                        f"No attendance recorded within {NO_SHOW_GRACE_MINUTES} minutes after the slot ended",
+                    ),
+                )
+                enqueue_appointment_event(
+                    cursor,
+                    int(appointment["appointment_id"]),
+                    "APPOINTMENT_NO_SHOW",
+                    {
+                        "appointment_id": int(appointment["appointment_id"]),
+                        "patient_id": int(appointment["patient_id"]),
+                        "doctor_id": int(appointment["doctor_id"]),
+                        "slot_id": int(appointment["slot_id"]),
+                        "status": "NO_SHOW",
+                        "refund_percentage": "0",
+                    },
+                )
+                no_show_count += 1
+
             cursor.execute(
                 """
                 SELECT slot_id
@@ -134,6 +210,8 @@ def handler(event, context):
             "body": json.dumps({
                 "message": "Slot maintenance completed",
                 "slots_marked_completed": completed_count,
+                "appointments_marked_no_show": no_show_count,
+                "no_show_grace_minutes": NO_SHOW_GRACE_MINUTES,
                 "processed_at": now_ist.isoformat(),
                 "timezone": "Asia/Kolkata",
             }),

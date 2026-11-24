@@ -408,6 +408,32 @@ Resources:
           Fn::Sub: '${ProjectName}-${Environment}-AuthAuthorizerId'
       Target: !Sub 'integrations/${AppointmentsIntegration}'
 
+  DoctorCheckInAppointmentRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId:
+        Fn::ImportValue:
+          Fn::Sub: '${ProjectName}-${Environment}-AuthApiId'
+      RouteKey: 'POST /appointments/{appointmentId}/check-in'
+      AuthorizationType: CUSTOM
+      AuthorizerId:
+        Fn::ImportValue:
+          Fn::Sub: '${ProjectName}-${Environment}-AuthAuthorizerId'
+      Target: !Sub 'integrations/${AppointmentsIntegration}'
+
+  DoctorCompleteAppointmentRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId:
+        Fn::ImportValue:
+          Fn::Sub: '${ProjectName}-${Environment}-AuthApiId'
+      RouteKey: 'POST /appointments/{appointmentId}/complete'
+      AuthorizationType: CUSTOM
+      AuthorizerId:
+        Fn::ImportValue:
+          Fn::Sub: '${ProjectName}-${Environment}-AuthAuthorizerId'
+      Target: !Sub 'integrations/${AppointmentsIntegration}'
+
   CancelAppointmentRoute:
     Type: AWS::ApiGatewayV2::Route
     Properties:
@@ -432,6 +458,32 @@ Resources:
         Fn::ImportValue:
           Fn::Sub: '${ProjectName}-${Environment}-AuthApiId'
       RouteKey: 'GET /doctors/me/appointments'
+      AuthorizationType: CUSTOM
+      AuthorizerId:
+        Fn::ImportValue:
+          Fn::Sub: '${ProjectName}-${Environment}-AuthAuthorizerId'
+      Target: !Sub 'integrations/${AppointmentsIntegration}'
+
+  DoctorBlackoutPreviewRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId:
+        Fn::ImportValue:
+          Fn::Sub: '${ProjectName}-${Environment}-AuthApiId'
+      RouteKey: 'POST /doctors/me/blackouts/preview'
+      AuthorizationType: CUSTOM
+      AuthorizerId:
+        Fn::ImportValue:
+          Fn::Sub: '${ProjectName}-${Environment}-AuthAuthorizerId'
+      Target: !Sub 'integrations/${AppointmentsIntegration}'
+
+  DoctorBlackoutActivateRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId:
+        Fn::ImportValue:
+          Fn::Sub: '${ProjectName}-${Environment}-AuthApiId'
+      RouteKey: 'POST /doctors/me/blackouts/activate'
       AuthorizationType: CUSTOM
       AuthorizerId:
         Fn::ImportValue:

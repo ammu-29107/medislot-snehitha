@@ -3,9 +3,12 @@ import os
 import json
 import logging
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import boto3
 import pymysql
+
+from common.scheduling import reconcile_doctor_schedule
 
 logger = logging.getLogger()
 logger.setLevel(os.getenv("LOG_LEVEL", "INFO"))
@@ -16,6 +19,8 @@ DB_HOST = os.environ["DB_HOST"]
 DB_NAME = os.getenv("DB_NAME", "medislot")
 DB_USER = os.environ["DB_USER"]
 DB_PASSWORD_PARAMETER = os.environ["DB_PASSWORD_PARAMETER"]
+SLOT_WINDOW_DAYS_PARAMETER = os.environ["SLOT_WINDOW_DAYS_PARAMETER"]
+IST = ZoneInfo("Asia/Kolkata")
 
 ALLOWED_FIELDS = {
     "consultation_type_id",
@@ -354,6 +359,20 @@ def deactivate_pattern(cursor, doctor_id, pattern_id):
             raise LookupError("Availability pattern not found")
 
 
+def get_slot_window_days():
+    value = ssm.get_parameter(
+        Name=SLOT_WINDOW_DAYS_PARAMETER,
+        WithDecryption=True,
+    )["Parameter"]["Value"]
+    try:
+        days = int(value)
+    except (TypeError, ValueError):
+        raise RuntimeError("The slot generation window parameter must be an integer")
+    if not 1 <= days <= 90:
+        raise RuntimeError("The slot generation window must be between 1 and 90 days")
+    return days
+
+
 def handler(event, context):
     doctor_id = get_identity(event)
 
@@ -388,12 +407,19 @@ def handler(event, context):
                 pattern_id, pattern_status = create_pattern(
                     cursor, doctor_id, get_body(event)
                 )
+                schedule_result = reconcile_doctor_schedule(
+                    cursor,
+                    doctor_id,
+                    datetime.now(IST).replace(tzinfo=None),
+                    get_slot_window_days(),
+                )
                 connection.commit()
 
                 return response(201, {
-                    "message": "Availability pattern created",
+                    "message": "Availability pattern created and schedule reconciled",
                     "pattern_id": pattern_id,
                     "status": pattern_status,
+                    **schedule_result,
                 })
 
             if method == "PUT":
@@ -406,10 +432,17 @@ def handler(event, context):
                     pattern_id,
                     get_body(event),
                 )
+                schedule_result = reconcile_doctor_schedule(
+                    cursor,
+                    doctor_id,
+                    datetime.now(IST).replace(tzinfo=None),
+                    get_slot_window_days(),
+                )
                 connection.commit()
 
                 return response(200, {
-                    "message": "Availability pattern updated"
+                    "message": "Availability pattern updated and schedule reconciled",
+                    **schedule_result,
                 })
 
             if method == "DELETE":
@@ -417,10 +450,17 @@ def handler(event, context):
                     raise ValueError("patternId is required")
 
                 deactivate_pattern(cursor, doctor_id, pattern_id)
+                schedule_result = reconcile_doctor_schedule(
+                    cursor,
+                    doctor_id,
+                    datetime.now(IST).replace(tzinfo=None),
+                    get_slot_window_days(),
+                )
                 connection.commit()
 
                 return response(200, {
-                    "message": "Availability pattern deactivated"
+                    "message": "Availability pattern deactivated and schedule reconciled",
+                    **schedule_result,
                 })
 
         return response(405, {"message": "Method not allowed"})

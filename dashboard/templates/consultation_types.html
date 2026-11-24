@@ -135,7 +135,7 @@
                     <div>
                         <h3>Saved consultation types</h3>
                         <p class="muted">
-                            Select any row to expand its details and edit or disable the service.
+                            Select any row to expand its details, edit the service, or permanently delete it when no appointment history depends on it.
                         </p>
                     </div>
                     <span class="count-chip">
@@ -284,23 +284,20 @@
                                                     </div>
                                                 </form>
 
-                                                {% if item.status == 'ACTIVE' %}
-                                                    <form
-                                                        method="POST"
-                                                        action="{{ url_for('disable_consultation_type', type_id=item.consultation_type_id) }}"
-                                                        class="disable-type-form"
-                                                        data-confirm="Disable this consultation type? Existing appointments and historical records will be retained."
-                                                    >
-                                                        <button type="submit" class="btn btn-danger">
-                                                            Disable consultation type
-                                                        </button>
-                                                    </form>
-                                                {% else %}
-                                                    <p class="inline-notice">
-                                                        This consultation type is disabled.
-                                                        It cannot be selected for new availability or slots.
-                                                    </p>
-                                                {% endif %}
+                                                <div class="consultation-delete-warning">
+                                                    <strong>Permanent deletion</strong>
+                                                    <p class="muted">Generated slots and their waitlist/inventory records are removed. If any appointment history references this service, deletion is blocked so patient records remain intact.</p>
+                                                </div>
+                                                <form
+                                                    method="POST"
+                                                    action="{{ url_for('delete_consultation_type', type_id=item.consultation_type_id) }}"
+                                                    class="delete-type-form"
+                                                    data-confirm="Permanently delete {{ item.type_name }}? Its unbooked slots, availability patterns and waitlist records will be removed. Existing appointment history will be preserved and will prevent deletion."
+                                                >
+                                                    <button type="submit" class="btn btn-danger">
+                                                        Delete consultation type permanently
+                                                    </button>
+                                                </form>
 
                                             </div>
                                         </td>

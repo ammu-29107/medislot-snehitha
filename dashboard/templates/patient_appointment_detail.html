@@ -21,11 +21,21 @@
                     <div><dt>Date &amp; time</dt><dd>{{ appointment.start_at|ist_datetime }}</dd></div>
                     <div><dt>Consultation fee</dt><dd>₹{{ appointment.consultation_fee|default('0.00') }}</dd></div>
                     <div><dt>Appointment status</dt><dd>{{ appointment.status|default('UNKNOWN')|replace('_',' ')|title }}</dd></div>
+                    {% if appointment.checked_in_at %}<div><dt>Checked in</dt><dd>{{ appointment.checked_in_at|ist_datetime }}</dd></div>{% endif %}
+                    {% if appointment.completed_at %}<div><dt>Completed</dt><dd>{{ appointment.completed_at|ist_datetime }}</dd></div>{% endif %}
                     {% if appointment.cancelled_at %}<div><dt>Cancelled at</dt><dd>{{ appointment.cancelled_at|ist_datetime }}</dd></div>{% endif %}
                     {% if appointment.cancellation_reason %}<div><dt>Cancellation reason</dt><dd>{{ appointment.cancellation_reason }}</dd></div>{% endif %}
                 </dl>
                 {% if appointment.status == 'CONFIRMED' %}
-                    <form method="POST" action="{{ url_for('patient_cancel_appointment', appointment_id=appointment.appointment_id) }}" onsubmit="return confirm('Cancel this appointment?');"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="reason" value="Cancelled by patient"><button class="btn btn-danger" type="submit">Cancel appointment</button></form>
+                    <div class="appointment-cancel-quote">
+                        <span>Estimated refund if cancelled now: <strong>₹{{ appointment.refund_quote_amount|default('0.00') }}</strong></span>
+                        <small>{{ appointment.refund_quote_percentage|default('0') }}% · The final amount is recalculated at cancellation. Any positive refund is recorded in MediSlot's ledger; no payment transfer is initiated here.</small>
+                    </div>
+                    <form method="POST" action="{{ url_for('patient_cancel_appointment', appointment_id=appointment.appointment_id) }}" onsubmit="return confirm('Cancel this appointment? Estimated refund: ₹{{ appointment.refund_quote_amount|default('0.00') }} ({{ appointment.refund_quote_percentage|default('0') }}%). The final amount is recalculated at cancellation.');">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                        <input type="hidden" name="reason" value="Cancelled by patient">
+                        <button class="btn btn-danger" type="submit">Cancel appointment</button>
+                    </form>
                 {% endif %}
             </section>
         </section>

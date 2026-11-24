@@ -280,6 +280,7 @@ CREATE TABLE IF NOT EXISTS slots (
     booked_count SMALLINT UNSIGNED NOT NULL DEFAULT 0,
     active_hold_count SMALLINT UNSIGNED NOT NULL DEFAULT 0,
     inventory_version BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    closure_reason VARCHAR(40) NULL,
     status ENUM(
         'OPEN',
         'BLOCKED',
@@ -381,12 +382,15 @@ CREATE TABLE IF NOT EXISTS appointments (
     slot_id BIGINT UNSIGNED NOT NULL,
     status ENUM(
         'CONFIRMED',
+        'CHECKED_IN',
         'COMPLETED',
         'CANCELLED_BY_PATIENT',
         'CANCELLED_BY_DOCTOR',
         'NO_SHOW'
     ) NOT NULL DEFAULT 'CONFIRMED',
     booked_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    checked_in_at DATETIME NULL,
+    completed_at DATETIME NULL,
     cancelled_at TIMESTAMP NULL,
     cancellation_reason VARCHAR(500) NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,

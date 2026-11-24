@@ -7,7 +7,7 @@
     <main class="main-content">
         <header class="topbar"><button class="menu-toggle" id="menuToggle" type="button" aria-label="Toggle navigation">☰</button><div><span class="topbar-label">DOCTOR PORTAL</span><h2>Appointments</h2></div></header>
         <section class="page-content">
-            <div class="welcome-section"><div><p class="eyebrow">PATIENT BOOKINGS</p><h1>Appointments</h1><p class="muted">Review confirmed bookings and patient contact details.</p></div><a class="btn btn-secondary" href="{{ url_for('schedule') }}">View schedule →</a></div>
+            <div class="welcome-section"><div><p class="eyebrow">PATIENT BOOKINGS</p><h1>Appointments</h1><p class="muted">Mark arrivals within the check-in window, then complete consultations. Unchecked confirmed appointments become NO SHOW 15 minutes after the slot ends.</p></div><a class="btn btn-secondary" href="{{ url_for('schedule') }}">View schedule →</a></div>
             {% include "_flash_messages.html" %}
             <section class="panel">
                 <div class="panel-heading"><div><h3>Appointment list</h3><p class="muted">{{ appointments|length }} booking(s)</p></div></div>
@@ -24,15 +24,36 @@
                                 {% if appointment.patient.phone_number %}<span><strong>Phone:</strong> {{ appointment.patient.phone_number }}</span>{% endif %}
                                 {% if appointment.patient.email %}<span><strong>Email:</strong> {{ appointment.patient.email }}</span>{% endif %}
                                 <span><strong>Fee:</strong> ₹{{ appointment.consultation_fee|default('0.00') }}</span>
+                                {% if appointment.checked_in_at %}<span><strong>Arrived:</strong> {{ appointment.checked_in_at|ist_datetime }}</span>{% endif %}
+                                {% if appointment.completed_at %}<span><strong>Completed:</strong> {{ appointment.completed_at|ist_datetime }}</span>{% endif %}
                             </div>
-                            {% if appointment.status == 'CONFIRMED' %}
-                                <form method="POST" action="{{ url_for('doctor_cancel_appointment', appointment_id=appointment.appointment_id) }}" onsubmit="return confirm('Cancel this appointment?');"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="reason" value="Cancelled by doctor"><button type="submit" class="btn btn-danger btn-small">Cancel appointment</button></form>
-                            {% endif %}
+                            <div class="appointment-management-actions">
+                                {% if appointment.status == 'CONFIRMED' %}
+                                    {% if appointment.can_check_in %}
+                                        <form method="POST" action="{{ url_for('doctor_check_in_appointment', appointment_id=appointment.appointment_id) }}">
+                                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                            <button type="submit" class="btn btn-secondary btn-small">Mark arrived</button>
+                                        </form>
+                                    {% else %}
+                                        <span class="muted">Check-in opens 2 hours before the appointment</span>
+                                    {% endif %}
+                                    <form method="POST" action="{{ url_for('doctor_cancel_appointment', appointment_id=appointment.appointment_id) }}" onsubmit="return confirm('Cancel this appointment and issue the applicable doctor-cancellation refund?');">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                        <input type="hidden" name="reason" value="Cancelled by doctor">
+                                        <button type="submit" class="btn btn-danger btn-small">Cancel appointment</button>
+                                    </form>
+                                {% elif appointment.status == 'CHECKED_IN' %}
+                                    <form method="POST" action="{{ url_for('doctor_complete_appointment', appointment_id=appointment.appointment_id) }}" onsubmit="return confirm('Mark this consultation as completed?');">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                        <button type="submit" class="btn btn-primary btn-small">Complete consultation</button>
+                                    </form>
+                                {% endif %}
+                            </div>
                         </article>
                     {% endfor %}
                     </div>
                 {% else %}
-                    <div class="empty-state compact-empty"><h4>No appointments found</h4><p>Confirmed bookings will appear here.</p><a href="{{ url_for('schedule') }}" class="btn btn-secondary">Open schedule</a></div>
+                    <div class="empty-state compact-empty"><h4>No appointments found</h4><p>Patient appointments will appear here.</p><a href="{{ url_for('schedule') }}" class="btn btn-secondary">Open schedule</a></div>
                 {% endif %}
             </section>
         </section>

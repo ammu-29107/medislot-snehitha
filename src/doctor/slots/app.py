@@ -389,7 +389,7 @@ def create_blackout(cursor, doctor_id, data):
     cursor.execute(
         """
         UPDATE slots
-        SET status = 'BLOCKED'
+        SET status = 'BLOCKED', closure_reason = 'BLACKOUT'
         WHERE doctor_id = %s
           AND start_at < %s
           AND end_at > %s

@@ -2,13 +2,15 @@
 import os
 import json
 import logging
-from datetime import date
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import boto3
 import pymysql
 
 logger = logging.getLogger()
 logger.setLevel(os.getenv("LOG_LEVEL", "INFO"))
+IST = ZoneInfo("Asia/Kolkata")
 
 ssm = boto3.client("ssm")
 
@@ -142,6 +144,8 @@ def handler(event, context):
                     a.booking_reference,
                     a.status AS appointment_status,
                     a.booked_at,
+                    a.checked_in_at,
+                    a.completed_at,
                     p.patient_id,
                     p.full_name AS patient_name,
                     p.phone_number AS patient_phone,
@@ -154,7 +158,9 @@ def handler(event, context):
                     ON catalogue.catalogue_id = ct.catalogue_id
                 LEFT JOIN appointments a
                   ON a.slot_id = s.slot_id
-                 AND a.status = 'CONFIRMED'
+                 AND a.status IN (
+                     'CONFIRMED', 'CHECKED_IN', 'COMPLETED', 'NO_SHOW'
+                 )
                 LEFT JOIN patients p
                   ON p.patient_id = a.patient_id
                 WHERE s.doctor_id = %s
@@ -168,6 +174,7 @@ def handler(event, context):
             rows = cursor.fetchall()
 
         slots = {}
+        current_time = datetime.now(IST).replace(tzinfo=None)
 
         for row in rows:
             slot_id = row["slot_id"]
@@ -194,7 +201,14 @@ def handler(event, context):
                     "appointment_id": row["appointment_id"],
                     "booking_reference": row["booking_reference"],
                     "status": row["appointment_status"],
+                    "can_check_in": (
+                        row["appointment_status"] == "CONFIRMED"
+                        and row["start_at"] - timedelta(hours=2) <= current_time
+                        < row["end_at"] + timedelta(minutes=15)
+                    ),
                     "booked_at": row["booked_at"],
+                    "checked_in_at": row["checked_in_at"],
+                    "completed_at": row["completed_at"],
                     "patient": {
                         "patient_id": row["patient_id"],
                         "full_name": row["patient_name"],
@@ -202,6 +216,18 @@ def handler(event, context):
                         "email": row["patient_email"],
                     },
                 })
+
+        for slot in slots.values():
+            slot["can_cancel"] = (
+                slot["status"] == "OPEN"
+                and slot["start_at"] > current_time
+                and bool(slot["appointments"])
+                and int(slot["booked_count"]) == len(slot["appointments"])
+                and all(
+                    appointment["status"] == "CONFIRMED"
+                    for appointment in slot["appointments"]
+                )
+            )
 
         result = {
             "start_date": range_start.isoformat(),

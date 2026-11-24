@@ -20,39 +20,98 @@
                 <div>
                     <p class="eyebrow">TIME OFF &amp; UNAVAILABILITY</p>
                     <h1>Blackout periods</h1>
-                    <p class="muted">Mark periods when you are unavailable. MediSlot prevents new slots from being generated in these windows and blocks eligible unbooked slots already created.</p>
+                    <p class="muted">Mark periods when you are unavailable. MediSlot previews affected bookings first, then cancels confirmed appointments with full refund entitlements before blocking the slots.</p>
                 </div>
                 <a class="btn btn-secondary" href="{{ url_for('schedule') }}">View schedule →</a>
             </div>
 
             {% include "_flash_messages.html" %}
 
-            <section class="panel">
+            <section class="panel blackout-create-panel">
                 <div class="panel-heading">
                     <div>
                         <h3>Add a blackout period</h3>
-                        <p class="muted">Enter start and end in India Standard Time (IST).</p>
+                        <p class="muted">Enter start and end in India Standard Time (IST). You will review affected bookings before the blackout is activated.</p>
                     </div>
                 </div>
                 <form method="POST" action="{{ url_for('blackout_dates') }}" class="form-grid">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                     <div class="form-group">
                         <label for="blackout-start">Starts</label>
-                        <input id="blackout-start" type="datetime-local" name="start_at" required>
+                        <input id="blackout-start" type="datetime-local" name="start_at" value="{{ blackout_form_values.start_at }}" required>
                     </div>
                     <div class="form-group">
                         <label for="blackout-end">Ends</label>
-                        <input id="blackout-end" type="datetime-local" name="end_at" required>
+                        <input id="blackout-end" type="datetime-local" name="end_at" value="{{ blackout_form_values.end_at }}" required>
                     </div>
                     <div class="form-group form-group-full">
                         <label for="blackout-reason">Reason (optional)</label>
-                        <textarea id="blackout-reason" name="reason" rows="3" maxlength="500" placeholder="e.g. Personal leave, conference, clinic closed"></textarea>
+                        <textarea id="blackout-reason" name="reason" rows="3" maxlength="500" placeholder="e.g. Personal leave, conference, clinic closed">{{ blackout_form_values.reason }}</textarea>
                     </div>
                     <div class="form-actions form-actions-wide">
-                        <button type="submit" class="btn btn-primary">Save blackout period</button>
+                        <button type="submit" class="btn btn-primary">Preview affected appointments</button>
                     </div>
                 </form>
-                <p class="form-help">If a blackout overlaps a slot with confirmed bookings, the API rejects it. Complete the appointment cancellation/leave workflow first.</p>
             </section>
+
+            {% if blackout_preview %}
+                <section class="panel blackout-preview-panel" aria-labelledby="blackout-preview-title">
+                    <div class="panel-heading">
+                        <div>
+                            <p class="eyebrow">REVIEW BEFORE ACTIVATION</p>
+                            <h3 id="blackout-preview-title">Blackout impact preview</h3>
+                            <p class="muted">{{ blackout_preview.start_at|ist_datetime }} – {{ blackout_preview.end_at|ist_datetime }}</p>
+                        </div>
+                        <span class="count-chip">{{ blackout_preview.slots_affected }} affected slot(s)</span>
+                    </div>
+                    <div class="blackout-impact-summary">
+                        <div><strong>{{ blackout_preview.appointments_to_cancel }}</strong><span>Appointments to cancel</span></div>
+                        <div><strong>₹{{ blackout_preview.refund_total_estimate }}</strong><span>Estimated full refunds</span></div>
+                        <div><strong>{{ blackout_preview.active_holds }}</strong><span>Active holds</span></div>
+                        <div><strong>{{ blackout_preview.checked_in_appointments }}</strong><span>Patients already arrived</span></div>
+                        <div><strong>{{ blackout_preview.started_slots }}</strong><span>Slots already started</span></div>
+                    </div>
+                    {% if blackout_preview.slots %}
+                        <div class="table-wrap">
+                            <table class="data-table">
+                                <thead><tr><th>Slot</th><th>Bookings</th><th>Patients</th><th>Refund</th></tr></thead>
+                                <tbody>
+                                    {% for slot in blackout_preview.slots %}
+                                        <tr>
+                                            <td>{{ slot.start_at|ist_datetime }} – {{ slot.end_at|ist_time }}</td>
+                                            <td>{{ slot.booked_count }} booked · {{ slot.active_hold_count }} holds</td>
+                                            <td>
+                                                {% for appointment in slot.appointments %}
+                                                    <div>{{ appointment.patient_name }} <span class="muted">({{ appointment.status|replace('_', ' ')|title }})</span></div>
+                                                {% else %}—{% endfor %}
+                                            </td>
+                                            <td>
+                                                {% for appointment in slot.appointments %}
+                                                    {% if appointment.status == 'CONFIRMED' %}₹{{ appointment.refund_amount }}{% endif %}
+                                                {% else %}—{% endfor %}
+                                            </td>
+                                        </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    {% else %}
+                        <p class="inline-notice">No existing slots overlap this blackout. The period will still prevent future slot generation.</p>
+                    {% endif %}
+                    {% if blackout_preview.active_holds or blackout_preview.checked_in_appointments or blackout_preview.started_slots %}
+                        <div class="inline-notice notice-warning">Activation is blocked while affected slots have active holds, patients who have already checked in, or slots that have already started. Resolve those items and preview again.</div>
+                    {% else %}
+                        <form method="POST" action="{{ url_for('blackout_dates') }}" class="blackout-confirm-form" onsubmit="return confirm('Activate this blackout? Confirmed appointments listed above will be cancelled and their full refund entitlements recorded.');">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                            <input type="hidden" name="start_at" value="{{ blackout_form_values.start_at }}">
+                            <input type="hidden" name="end_at" value="{{ blackout_form_values.end_at }}">
+                            <input type="hidden" name="reason" value="{{ blackout_form_values.reason }}">
+                            <input type="hidden" name="confirm_blackout" value="1">
+                            <button type="submit" class="btn btn-danger">Cancel affected appointments and activate blackout</button>
+                        </form>
+                    {% endif %}
+                </section>
+            {% endif %}
 
             <section class="panel">
                 <div class="panel-heading">

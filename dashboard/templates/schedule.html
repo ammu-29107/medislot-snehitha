@@ -20,7 +20,9 @@
                     </summary>
                     <div class="ms-appointment-info">
                         <strong>{{ appointment.booking_reference }}</strong>
-                        <span>{{ appointment.status|title }}</span>
+                        <span>{{ appointment.status|replace('_', ' ')|title }}</span>
+                        {% if appointment.checked_in_at %}<span>Arrived: {{ appointment.checked_in_at|ist_datetime }}</span>{% endif %}
+                        {% if appointment.completed_at %}<span>Completed: {{ appointment.completed_at|ist_datetime }}</span>{% endif %}
                         {% if appointment.patient.phone_number %}
                             <span>{{ appointment.patient.phone_number }}</span>
                         {% endif %}
@@ -34,12 +36,31 @@
     {% else %}
         <div class="ms-event-empty">No confirmed appointment</div>
     {% endif %}
-    {% if slot.status == 'OPEN' %}
-        <form method="POST" action="{{ url_for('doctor_cancel_slot', slot_id=slot.slot_id) }}" class="ms-slot-cancel-form" onsubmit="return confirm('Cancel this slot and any appointments booked in it?');">
+    {% for appointment in slot.appointments %}
+        {% if appointment.status == 'CONFIRMED' and appointment.can_check_in %}
+            <form method="POST" action="{{ url_for('doctor_check_in_appointment', appointment_id=appointment.appointment_id) }}" class="ms-attendance-action">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <input type="hidden" name="schedule_date" value="{{ selected_date }}">
+                <input type="hidden" name="calendar_view" value="{{ calendar_view }}">
+                <button class="btn btn-secondary btn-small" type="submit">Mark arrived</button>
+            </form>
+        {% elif appointment.status == 'CONFIRMED' %}
+            <span class="ms-attendance-note">Check-in opens 2 hours before the slot</span>
+        {% elif appointment.status == 'CHECKED_IN' %}
+            <form method="POST" action="{{ url_for('doctor_complete_appointment', appointment_id=appointment.appointment_id) }}" class="ms-attendance-action" onsubmit="return confirm('Mark this consultation as completed?');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <input type="hidden" name="schedule_date" value="{{ selected_date }}">
+                <input type="hidden" name="calendar_view" value="{{ calendar_view }}">
+                <button class="btn btn-primary btn-small" type="submit">Complete consultation</button>
+            </form>
+        {% endif %}
+    {% endfor %}
+    {% if slot.can_cancel %}
+        <form method="POST" action="{{ url_for('doctor_cancel_slot', slot_id=slot.slot_id) }}" class="ms-slot-cancel-form" onsubmit="return confirm('Cancel this booked slot and issue full refunds to the affected patients?');">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <input type="hidden" name="schedule_date" value="{{ selected_date }}">
             <input type="hidden" name="calendar_view" value="{{ calendar_view }}">
-            <button class="btn btn-danger btn-small" type="submit">Cancel slot</button>
+            <button class="btn btn-danger btn-small" type="submit">Cancel booked slot</button>
         </form>
     {% endif %}
 </article>
@@ -62,7 +83,7 @@
                 <div>
                     <p class="eyebrow">APPOINTMENT MANAGEMENT</p>
                     <h1>Calendar</h1>
-                    <p class="muted">View your slots and confirmed patient appointments in day, week or month format.</p>
+                    <p class="muted">Mark patients as arrived from 2 hours before their slot. Confirmed appointments without check-in become NO SHOW 15 minutes after the slot ends.</p>
                 </div>
                 <a class="btn btn-secondary" href="{{ url_for('availability') }}">Manage availability →</a>
             </div>
@@ -72,9 +93,9 @@
             <section class="panel ms-calendar-panel">
                 <div class="ms-calendar-toolbar">
                     <div class="ms-calendar-toolbar-left">
-                        <a class="btn btn-secondary" href="{{ url_for('schedule', date=previous_date, view=calendar_view) }}" aria-label="Previous period">‹</a>
+                        <a class="btn btn-secondary" href="{{ url_for('schedule', date=previous_date, view=calendar_view) }}" aria-label="{{ previous_period_label }}">‹ <span class="ms-calendar-nav-label">{{ previous_period_label }}</span></a>
                         <a class="btn btn-secondary" href="{{ url_for('schedule', date=today_iso, view=calendar_view) }}">Today</a>
-                        <a class="btn btn-secondary" href="{{ url_for('schedule', date=next_date, view=calendar_view) }}" aria-label="Next period">›</a>
+                        <a class="btn btn-secondary" href="{{ url_for('schedule', date=next_date, view=calendar_view) }}" aria-label="{{ next_period_label }}"><span class="ms-calendar-nav-label">{{ next_period_label }}</span> ›</a>
                         <h3>{{ display_title }}</h3>
                     </div>
                     <nav class="ms-calendar-views" aria-label="Calendar view">

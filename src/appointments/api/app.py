@@ -308,7 +308,7 @@ def create_appointment(cursor, patient_id, slot_id):
         FROM appointments a
         INNER JOIN slots s ON s.slot_id = a.slot_id
         WHERE a.patient_id = %s
-          AND a.status = 'CONFIRMED'
+          AND a.status IN ('CONFIRMED', 'CHECKED_IN')
           AND s.start_at > %s
         """,
         (patient_id, now),
@@ -388,7 +388,8 @@ def list_appointments(cursor, role, user_id, appointment_id=None):
     sql = f"""
         SELECT
             a.appointment_id, a.booking_reference, a.status,
-            a.booked_at, a.cancelled_at, a.cancellation_reason,
+            a.booked_at, a.checked_in_at, a.completed_at,
+            a.cancelled_at, a.cancellation_reason,
             a.slot_id, s.doctor_id, s.start_at, s.end_at,
             s.status AS slot_status, s.consultation_type_id,
             a.consultation_fee_snapshot AS consultation_fee,
@@ -415,8 +416,30 @@ def list_appointments(cursor, role, user_id, appointment_id=None):
     rows = cursor.fetchall()
     if appointment_id is not None and not rows:
         raise ApiError(404, "Appointment not found")
-    if role == "DOCTOR":
+
+    if role == "PATIENT":
+        quote_time = now_ist()
         for row in rows:
+            if row["status"] == "CONFIRMED":
+                percent = refund_percentage(row["start_at"], quote_time)
+                fee = Decimal(str(row["consultation_fee"] or 0))
+                estimate = (
+                    fee * percent / Decimal("100")
+                ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                row["refund_quote_percentage"] = str(percent)
+                row["refund_quote_amount"] = str(estimate)
+            else:
+                row["refund_quote_percentage"] = None
+                row["refund_quote_amount"] = None
+
+    if role == "DOCTOR":
+        current_time = now_ist()
+        for row in rows:
+            row["can_check_in"] = (
+                row["status"] == "CONFIRMED"
+                and row["start_at"] - timedelta(hours=2) <= current_time
+                < row["end_at"] + timedelta(minutes=15)
+            )
             row["patient"] = {
                 "full_name": row.pop("patient_full_name", None),
                 "phone_number": row.pop("patient_phone_number", None),
@@ -552,11 +575,130 @@ def cancel_appointment(cursor, appointment_id, actor_id, actor_role, reason):
     }, int(row["slot_id"])
 
 
-def cancel_doctor_slot(cursor, slot_id, doctor_id, reason):
+def mark_appointment_checked_in(cursor, appointment_id, doctor_id):
     now = now_ist()
     cursor.execute(
         """
-        SELECT slot_id, doctor_id, status, start_at
+        SELECT a.appointment_id, a.patient_id, a.status,
+               s.slot_id, s.start_at, s.end_at, s.status AS slot_status
+        FROM appointments a
+        INNER JOIN slots s ON s.slot_id = a.slot_id
+        WHERE a.appointment_id = %s AND s.doctor_id = %s
+        FOR UPDATE
+        """,
+        (appointment_id, doctor_id),
+    )
+    row = cursor.fetchone()
+    if not row:
+        raise ApiError(404, "Appointment not found")
+    if row["status"] != "CONFIRMED":
+        raise ApiError(409, "Only confirmed appointments can be checked in")
+    if row["slot_status"] in ("CANCELLED", "BLOCKED"):
+        raise ApiError(409, "This appointment's slot is not active")
+    if now < row["start_at"] - timedelta(hours=2):
+        raise ApiError(409, "Check-in opens two hours before the appointment")
+    if now >= row["end_at"] + timedelta(minutes=15):
+        raise ApiError(409, "The check-in window has ended")
+
+    cursor.execute(
+        """
+        UPDATE appointments
+        SET status = 'CHECKED_IN', checked_in_at = %s
+        WHERE appointment_id = %s AND status = 'CONFIRMED'
+        """,
+        (now, appointment_id),
+    )
+    if cursor.rowcount != 1:
+        raise ApiError(409, "Appointment status changed; refresh and try again")
+
+    cursor.execute(
+        """
+        INSERT INTO appointment_status_history (
+            appointment_id, previous_status, new_status,
+            changed_by_role, changed_by_id, reason
+        )
+        VALUES (%s, 'CONFIRMED', 'CHECKED_IN', 'DOCTOR', %s, 'Patient arrived')
+        """,
+        (appointment_id, doctor_id),
+    )
+    outbox(
+        cursor, "APPOINTMENT", appointment_id, "APPOINTMENT_CHECKED_IN",
+        {
+            "appointment_id": int(appointment_id),
+            "patient_id": int(row["patient_id"]),
+            "doctor_id": int(doctor_id),
+            "slot_id": int(row["slot_id"]),
+            "status": "CHECKED_IN",
+            "checked_in_at": now.isoformat(),
+        },
+    )
+    return {"appointment_id": int(appointment_id), "status": "CHECKED_IN"}
+
+
+def complete_appointment(cursor, appointment_id, doctor_id):
+    now = now_ist()
+    cursor.execute(
+        """
+        SELECT a.appointment_id, a.patient_id, a.status, s.slot_id
+        FROM appointments a
+        INNER JOIN slots s ON s.slot_id = a.slot_id
+        WHERE a.appointment_id = %s AND s.doctor_id = %s
+        FOR UPDATE
+        """,
+        (appointment_id, doctor_id),
+    )
+    row = cursor.fetchone()
+    if not row:
+        raise ApiError(404, "Appointment not found")
+    if row["status"] != "CHECKED_IN":
+        raise ApiError(409, "Only checked-in appointments can be completed")
+
+    cursor.execute(
+        """
+        UPDATE appointments
+        SET status = 'COMPLETED', completed_at = %s
+        WHERE appointment_id = %s AND status = 'CHECKED_IN'
+        """,
+        (now, appointment_id),
+    )
+    if cursor.rowcount != 1:
+        raise ApiError(409, "Appointment status changed; refresh and try again")
+
+    cursor.execute(
+        """
+        INSERT INTO appointment_status_history (
+            appointment_id, previous_status, new_status,
+            changed_by_role, changed_by_id, reason
+        )
+        VALUES (%s, 'CHECKED_IN', 'COMPLETED', 'DOCTOR', %s, 'Consultation completed')
+        """,
+        (appointment_id, doctor_id),
+    )
+    outbox(
+        cursor, "APPOINTMENT", appointment_id, "APPOINTMENT_COMPLETED",
+        {
+            "appointment_id": int(appointment_id),
+            "patient_id": int(row["patient_id"]),
+            "doctor_id": int(doctor_id),
+            "slot_id": int(row["slot_id"]),
+            "status": "COMPLETED",
+            "completed_at": now.isoformat(),
+        },
+    )
+    return {"appointment_id": int(appointment_id), "status": "COMPLETED"}
+
+
+def cancel_doctor_slot(
+    cursor, slot_id, doctor_id, reason, final_status="CANCELLED"
+):
+    now = now_ist()
+    if final_status not in ("CANCELLED", "BLOCKED"):
+        raise ValueError("Invalid final slot status")
+
+    cursor.execute(
+        """
+        SELECT slot_id, doctor_id, status, start_at, booked_count,
+               active_hold_count
         FROM slots WHERE slot_id = %s FOR UPDATE
         """,
         (slot_id,),
@@ -566,6 +708,22 @@ def cancel_doctor_slot(cursor, slot_id, doctor_id, reason):
         raise ApiError(404, "Slot not found")
     if slot["status"] not in ("OPEN", "BLOCKED"):
         raise ApiError(409, "Slot cannot be cancelled in its current state")
+    if slot["start_at"] <= now:
+        raise ApiError(409, "A slot that has already started cannot be cancelled or blocked")
+    if int(slot["active_hold_count"]) > 0:
+        raise ApiError(409, "This slot has active booking holds that must expire first")
+
+    cursor.execute(
+        """
+        SELECT appointment_id
+        FROM appointments
+        WHERE slot_id = %s AND status = 'CHECKED_IN'
+        FOR UPDATE
+        """,
+        (slot_id,),
+    )
+    if cursor.fetchone():
+        raise ApiError(409, "A patient has already arrived for this slot; complete the consultation first")
 
     cursor.execute(
         """
@@ -573,15 +731,18 @@ def cancel_doctor_slot(cursor, slot_id, doctor_id, reason):
             a.appointment_id, a.patient_id, a.status,
             a.consultation_fee_snapshot AS consultation_fee
         FROM appointments a
-        INNER JOIN slots s ON s.slot_id = a.slot_id
-        INNER JOIN consultation_types ct
-            ON ct.consultation_type_id = s.consultation_type_id
         WHERE a.slot_id = %s AND a.status = 'CONFIRMED'
         FOR UPDATE
         """,
         (slot_id,),
     )
     appointments = cursor.fetchall()
+    if len(appointments) != int(slot["booked_count"]):
+        raise ApiError(
+            409,
+            "Slot booking count does not match confirmed appointments. "
+            "Refresh the schedule and resolve the inventory mismatch before proceeding.",
+        )
 
     cancelled = []
     for appointment in appointments:
@@ -644,11 +805,245 @@ def cancel_doctor_slot(cursor, slot_id, doctor_id, reason):
         cancelled.append(int(appointment["appointment_id"]))
 
     cursor.execute(
-        "UPDATE slots SET status = 'CANCELLED', booked_count = 0 WHERE slot_id = %s",
+        """
+        SELECT waitlist_entry_id
+        FROM waitlist_entries
+        WHERE slot_id = %s AND status IN ('WAITING', 'OFFERED')
+        FOR UPDATE
+        """,
         (slot_id,),
+    )
+    waitlist_ids = [int(row["waitlist_entry_id"]) for row in cursor.fetchall()]
+    if waitlist_ids:
+        placeholders = ",".join(["%s"] * len(waitlist_ids))
+        cursor.execute(
+            f"""
+            UPDATE waitlist_offers
+            SET status = 'CANCELLED', responded_at = %s
+            WHERE waitlist_entry_id IN ({placeholders})
+              AND status = 'PENDING'
+            """,
+            (now, *waitlist_ids),
+        )
+        cursor.execute(
+            f"""
+            UPDATE waitlist_entries
+            SET status = 'CANCELLED', cancelled_at = %s
+            WHERE waitlist_entry_id IN ({placeholders})
+              AND status IN ('WAITING', 'OFFERED')
+            """,
+            (now, *waitlist_ids),
+        )
+
+    closure_reason = "BLACKOUT" if final_status == "BLOCKED" else "DOCTOR_CANCELLED"
+    cursor.execute(
+        """
+        UPDATE slots
+        SET status = %s, booked_count = 0, closure_reason = %s
+        WHERE slot_id = %s
+        """,
+        (final_status, closure_reason, slot_id),
     )
     enqueue_slot_inventory(cursor, int(slot_id))
     return cancelled
+
+
+def _parse_blackout_window(data):
+    def parse(value, field):
+        if not isinstance(value, str) or not value.strip():
+            raise ApiError(400, f"{field} is required")
+        try:
+            parsed = datetime.fromisoformat(value)
+        except ValueError:
+            raise ApiError(400, f"{field} must be a valid ISO-8601 date/time")
+        if parsed.tzinfo is not None:
+            parsed = parsed.astimezone(IST).replace(tzinfo=None)
+        return parsed
+
+    start_at = parse(data.get("start_at"), "start_at")
+    end_at = parse(data.get("end_at"), "end_at")
+    reason = data.get("reason")
+    if end_at <= start_at:
+        raise ApiError(400, "end_at must be later than start_at")
+    if start_at <= now_ist():
+        raise ApiError(400, "A blackout period must start in the future")
+    if reason is not None and (not isinstance(reason, str) or len(reason) > 500):
+        raise ApiError(400, "reason must be a string of at most 500 characters")
+    return start_at, end_at, reason
+
+
+def _lock_doctor_for_blackout(cursor, doctor_id):
+    cursor.execute(
+        """
+        SELECT doctor_id FROM doctors
+        WHERE doctor_id = %s AND status = 'ACTIVE'
+        FOR UPDATE
+        """,
+        (doctor_id,),
+    )
+    if not cursor.fetchone():
+        raise ApiError(404, "Active doctor profile not found")
+
+
+def _ensure_no_blackout_overlap(cursor, doctor_id, start_at, end_at):
+    cursor.execute(
+        """
+        SELECT blackout_id FROM blackout_dates
+        WHERE doctor_id = %s AND start_at < %s AND end_at > %s
+        LIMIT 1 FOR UPDATE
+        """,
+        (doctor_id, end_at, start_at),
+    )
+    if cursor.fetchone():
+        raise ApiError(409, "Blackout overlaps an existing blackout period")
+
+
+def preview_blackout(cursor, doctor_id, data):
+    start_at, end_at, reason = _parse_blackout_window(data)
+    _lock_doctor_for_blackout(cursor, doctor_id)
+    _ensure_no_blackout_overlap(cursor, doctor_id, start_at, end_at)
+
+    cursor.execute(
+        """
+        SELECT
+            s.slot_id, s.start_at, s.end_at, s.booked_count,
+            s.active_hold_count, s.status,
+            a.appointment_id, a.status AS appointment_status,
+            a.consultation_fee_snapshot AS consultation_fee,
+            p.full_name AS patient_name
+        FROM slots s
+        LEFT JOIN appointments a
+          ON a.slot_id = s.slot_id
+         AND a.status IN ('CONFIRMED', 'CHECKED_IN')
+        LEFT JOIN patients p ON p.patient_id = a.patient_id
+        WHERE s.doctor_id = %s
+          AND s.start_at < %s AND s.end_at > %s
+          AND s.status IN ('OPEN', 'BLOCKED')
+        ORDER BY s.start_at, a.appointment_id
+        FOR UPDATE
+        """,
+        (doctor_id, end_at, start_at),
+    )
+    rows = cursor.fetchall()
+    slots = {}
+    refund_total = Decimal("0.00")
+    checked_in_count = 0
+    started_slot_ids = set()
+    current_time = now_ist()
+    for row in rows:
+        slot_id = int(row["slot_id"])
+        if row["start_at"] <= current_time:
+            started_slot_ids.add(slot_id)
+        if slot_id not in slots:
+            slots[slot_id] = {
+                "slot_id": slot_id,
+                "start_at": row["start_at"],
+                "end_at": row["end_at"],
+                "booked_count": int(row["booked_count"]),
+                "active_hold_count": int(row["active_hold_count"]),
+                "status": row["status"],
+                "appointments": [],
+            }
+        if row["appointment_id"] is not None:
+            appointment = {
+                "appointment_id": int(row["appointment_id"]),
+                "patient_name": row["patient_name"] or "Patient",
+                "status": row["appointment_status"],
+                "refund_amount": str(
+                    Decimal(str(row["consultation_fee"] or 0)).quantize(
+                        Decimal("0.01"), rounding=ROUND_HALF_UP
+                    )
+                ) if row["appointment_status"] == "CONFIRMED" else "0.00",
+            }
+            slots[slot_id]["appointments"].append(appointment)
+            if row["appointment_status"] == "CHECKED_IN":
+                checked_in_count += 1
+            else:
+                refund_total += Decimal(str(row["consultation_fee"] or 0))
+
+    return {
+        "start_at": start_at,
+        "end_at": end_at,
+        "reason": reason,
+        "slots": list(slots.values()),
+        "slots_affected": len(slots),
+        "appointments_to_cancel": sum(
+            1 for slot in slots.values() for appointment in slot["appointments"]
+            if appointment["status"] == "CONFIRMED"
+        ),
+        "checked_in_appointments": checked_in_count,
+        "started_slots": len(started_slot_ids),
+        "active_holds": sum(slot["active_hold_count"] for slot in slots.values()),
+        "refund_total_estimate": str(
+            refund_total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        ),
+    }
+
+
+def activate_blackout(cursor, doctor_id, data):
+    start_at, end_at, reason = _parse_blackout_window(data)
+    _lock_doctor_for_blackout(cursor, doctor_id)
+    _ensure_no_blackout_overlap(cursor, doctor_id, start_at, end_at)
+
+    cursor.execute(
+        """
+        SELECT slot_id, active_hold_count
+        FROM slots
+        WHERE doctor_id = %s
+          AND start_at < %s AND end_at > %s
+          AND status IN ('OPEN', 'BLOCKED')
+        ORDER BY start_at, slot_id
+        FOR UPDATE
+        """,
+        (doctor_id, end_at, start_at),
+    )
+    affected_slots = cursor.fetchall()
+    if any(int(slot["active_hold_count"]) > 0 for slot in affected_slots):
+        raise ApiError(409, "One or more affected slots still have active booking holds. Wait for them to expire, then preview again.")
+
+    cancelled_appointments = []
+    for slot in affected_slots:
+        cancelled_appointments.extend(
+            cancel_doctor_slot(
+                cursor,
+                int(slot["slot_id"]),
+                doctor_id,
+                reason or "Doctor blackout period",
+                final_status="BLOCKED",
+            )
+        )
+
+    cursor.execute(
+        """
+        INSERT INTO blackout_dates (doctor_id, start_at, end_at, reason)
+        VALUES (%s, %s, %s, %s)
+        """,
+        (doctor_id, start_at, end_at, reason),
+    )
+    blackout_id = int(cursor.lastrowid)
+
+    refund_total = Decimal("0.00")
+    if cancelled_appointments:
+        placeholders = ",".join(["%s"] * len(cancelled_appointments))
+        cursor.execute(
+            f"""
+            SELECT COALESCE(SUM(amount), 0) AS refund_total
+            FROM refund_ledger
+            WHERE appointment_id IN ({placeholders})
+            """,
+            tuple(cancelled_appointments),
+        )
+        refund_total = Decimal(str(cursor.fetchone()["refund_total"])).quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        )
+
+    return {
+        "blackout_id": blackout_id,
+        "slots_blocked": len(affected_slots),
+        "appointments_cancelled": len(cancelled_appointments),
+        "refund_total": str(refund_total),
+        "status": "CREATED",
+    }
 
 
 def handler(event, context):
@@ -715,6 +1110,30 @@ def handler(event, context):
             connection.commit()
             return response(200, {"appointment": rows[0]})
 
+        if method == "POST" and path.startswith("/appointments/") and path.endswith("/check-in"):
+            if role != "DOCTOR":
+                raise ApiError(403, "Doctor role required")
+            appointment_id = parse_id(path.split("/")[-2], "appointmentId")
+            connection = get_connection()
+            with connection.cursor() as cursor:
+                result = mark_appointment_checked_in(
+                    cursor, appointment_id, int(user_id)
+                )
+            connection.commit()
+            return response(200, result)
+
+        if method == "POST" and path.startswith("/appointments/") and path.endswith("/complete"):
+            if role != "DOCTOR":
+                raise ApiError(403, "Doctor role required")
+            appointment_id = parse_id(path.split("/")[-2], "appointmentId")
+            connection = get_connection()
+            with connection.cursor() as cursor:
+                result = complete_appointment(
+                    cursor, appointment_id, int(user_id)
+                )
+            connection.commit()
+            return response(200, result)
+
         if method == "POST" and path.startswith("/appointments/") and path.endswith("/cancel"):
             if role not in ("PATIENT", "DOCTOR"):
                 raise ApiError(403, "Authenticated role required")
@@ -730,6 +1149,24 @@ def handler(event, context):
                 )
             connection.commit()
             return response(200, result)
+
+        if method == "POST" and path == "/doctors/me/blackouts/preview":
+            if role != "DOCTOR":
+                raise ApiError(403, "Doctor role required")
+            connection = get_connection()
+            with connection.cursor() as cursor:
+                result = preview_blackout(cursor, int(user_id), get_body(event))
+            connection.commit()
+            return response(200, result)
+
+        if method == "POST" and path == "/doctors/me/blackouts/activate":
+            if role != "DOCTOR":
+                raise ApiError(403, "Doctor role required")
+            connection = get_connection()
+            with connection.cursor() as cursor:
+                result = activate_blackout(cursor, int(user_id), get_body(event))
+            connection.commit()
+            return response(201, result)
 
         if method == "POST" and path.startswith("/doctors/me/slots/") and path.endswith("/cancel"):
             if role != "DOCTOR":

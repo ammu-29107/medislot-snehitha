@@ -201,6 +201,30 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
 
+    // Patient account deactivation uses an explicit, accessible confirmation dialog.
+    const deactivationDialog = document.getElementById("patientDeactivationDialog");
+    const openDeactivationButton = document.getElementById("openPatientDeactivation");
+    const cancelDeactivationButton = document.getElementById("cancelPatientDeactivation");
+
+    openDeactivationButton?.addEventListener("click", () => {
+        if (deactivationDialog?.showModal) {
+            deactivationDialog.showModal();
+            cancelDeactivationButton?.focus();
+        } else if (window.confirm("Deactivate your MediSlot account? Your appointment history will be retained.")) {
+            const form = deactivationDialog?.querySelector("form");
+            form?.requestSubmit();
+        }
+    });
+
+    cancelDeactivationButton?.addEventListener("click", () => {
+        deactivationDialog?.close();
+        openDeactivationButton?.focus();
+    });
+
+    deactivationDialog?.addEventListener("click", (event) => {
+        if (event.target === deactivationDialog) deactivationDialog.close();
+    });
+
     // Patient profile: switch between read-only and edit modes.
     const patientProfileView = document.getElementById("patientProfileView");
     const patientProfileEditor = document.getElementById("patientProfileEditor");

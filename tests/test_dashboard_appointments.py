@@ -117,3 +117,52 @@ def test_doctor_cancel_slot_route(monkeypatch):
     })
     assert response.status_code == 302
     assert calls[0][0:2] == ("POST", "/doctors/me/slots/77/cancel")
+
+
+def test_patient_appointment_list_shows_refund_estimate_without_booking_reference(monkeypatch):
+    monkeypatch.setattr(
+        dashboard_module, "call_doctor_api",
+        lambda method, path, **kwargs: ({"appointments": [{
+            "appointment_id": 21,
+            "doctor_name": "Test Doctor",
+            "booking_reference": "MS-INTERNAL-ONLY",
+            "start_at": "2026-11-25T10:00:00",
+            "status": "CONFIRMED",
+            "refund_quote_amount": "375.00",
+            "refund_quote_percentage": "75",
+        }]}, 200),
+    )
+    response = _client("PATIENT").get("/patient/appointments")
+    assert response.status_code == 200
+    assert b"Estimated refund" in response.data
+    assert b"375.00" in response.data
+    assert b"Booking Reference" not in response.data
+    assert b"MS-INTERNAL-ONLY" not in response.data
+
+
+def test_doctor_check_in_route_calls_appointment_api(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        dashboard_module, "call_doctor_api",
+        lambda method, path, **kwargs: (calls.append((method, path, kwargs)) or ({}, 200)),
+    )
+    response = _client("DOCTOR").post(
+        "/doctor/appointments/42/check-in",
+        data={"csrf_token": "csrf-test-token", "schedule_date": "2026-11-25", "calendar_view": "day"},
+    )
+    assert response.status_code == 302
+    assert calls[0][0:2] == ("POST", "/appointments/42/check-in")
+
+
+def test_doctor_complete_route_calls_appointment_api(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        dashboard_module, "call_doctor_api",
+        lambda method, path, **kwargs: (calls.append((method, path, kwargs)) or ({}, 200)),
+    )
+    response = _client("DOCTOR").post(
+        "/doctor/appointments/42/complete",
+        data={"csrf_token": "csrf-test-token", "schedule_date": "2026-11-25", "calendar_view": "day"},
+    )
+    assert response.status_code == 302
+    assert calls[0][0:2] == ("POST", "/appointments/42/complete")

@@ -11,6 +11,9 @@ logger = logging.getLogger()
 logger.setLevel(os.getenv("LOG_LEVEL", "INFO"))
 
 ssm = boto3.client("ssm")
+dynamodb = boto3.resource("dynamodb")
+SLOT_INVENTORY_TABLE = os.environ["SLOT_INVENTORY_TABLE"]
+slot_inventory_table = dynamodb.Table(SLOT_INVENTORY_TABLE)
 
 DB_HOST = os.environ["DB_HOST"]
 DB_NAME = os.getenv("DB_NAME", "medislot")
@@ -354,32 +357,144 @@ def update_type(connection, doctor_id, type_id, data):
         )
 
 
-def disable_type(connection, doctor_id, type_id):
-    with connection.cursor() as cursor:
-        cursor.execute(
-            """
-            UPDATE consultation_types
-            SET status = 'DISABLED'
-            WHERE consultation_type_id = %s
-              AND doctor_id = %s
-              AND status = 'ACTIVE'
-            """,
-            (type_id, doctor_id),
+def delete_type(cursor, doctor_id, type_id):
+    """Hard-delete a service and its unbooked generated scheduling data.
+
+    Appointment history is never deleted. Any appointment referencing one of
+    the type's slots blocks this operation, as do inconsistent inventory counts
+    or active holds.
+    """
+    cursor.execute(
+        """
+        SELECT doctor_id FROM doctors
+        WHERE doctor_id = %s AND status = 'ACTIVE'
+        FOR UPDATE
+        """,
+        (doctor_id,),
+    )
+    if not cursor.fetchone():
+        raise LookupError("Active doctor profile not found")
+
+    cursor.execute(
+        """
+        SELECT consultation_type_id
+        FROM consultation_types
+        WHERE consultation_type_id = %s AND doctor_id = %s
+        FOR UPDATE
+        """,
+        (type_id, doctor_id),
+    )
+    if not cursor.fetchone():
+        raise LookupError("Consultation type not found")
+
+    cursor.execute(
+        """
+        SELECT slot_id, booked_count, active_hold_count
+        FROM slots
+        WHERE doctor_id = %s AND consultation_type_id = %s
+        ORDER BY slot_id
+        FOR UPDATE
+        """,
+        (doctor_id, type_id),
+    )
+    slots = cursor.fetchall()
+    slot_ids = [int(row["slot_id"]) for row in slots]
+
+    if any(int(row["active_hold_count"]) > 0 for row in slots):
+        raise ConflictError(
+            "This consultation type has slots with active booking holds. "
+            "Wait for those holds to expire before deleting the service."
         )
 
-        if cursor.rowcount == 0:
-            cursor.execute(
-                """
-                SELECT consultation_type_id
-                FROM consultation_types
-                WHERE consultation_type_id = %s
-                  AND doctor_id = %s
-                """,
-                (type_id, doctor_id),
+    if any(int(row["booked_count"]) > 0 for row in slots):
+        raise ConflictError(
+            "This consultation type has booked slots. Cancel or complete "
+            "those appointments before deleting the service."
+        )
+
+    if slot_ids:
+        placeholders = ",".join(["%s"] * len(slot_ids))
+        cursor.execute(
+            f"""
+            SELECT COUNT(*) AS appointment_count
+            FROM appointments
+            WHERE slot_id IN ({placeholders})
+            """,
+            tuple(slot_ids),
+        )
+        appointment_count = int(cursor.fetchone()["appointment_count"])
+        if appointment_count:
+            raise ConflictError(
+                f"This consultation type has {appointment_count} appointment "
+                "history record(s). MediSlot preserves appointment history, "
+                "so this service cannot be hard-deleted."
             )
 
-            if not cursor.fetchone():
-                raise LookupError("Consultation type not found")
+        # Remove waitlist records and SQL inventory events before their slots.
+        cursor.execute(
+            f"""
+            DELETE offer
+            FROM waitlist_offers offer
+            INNER JOIN waitlist_entries entry
+                ON entry.waitlist_entry_id = offer.waitlist_entry_id
+            WHERE entry.slot_id IN ({placeholders})
+            """,
+            tuple(slot_ids),
+        )
+        cursor.execute(
+            f"DELETE FROM waitlist_entries WHERE slot_id IN ({placeholders})",
+            tuple(slot_ids),
+        )
+        cursor.execute(
+            f"""
+            SELECT inventory_event_id, status
+            FROM slot_inventory_outbox
+            WHERE slot_id IN ({placeholders})
+            FOR UPDATE
+            """,
+            tuple(slot_ids),
+        )
+        inventory_events = cursor.fetchall()
+        if any(event["status"] == "PROCESSING" for event in inventory_events):
+            raise ConflictError(
+                "Slot inventory is currently being synchronized. "
+                "Wait briefly and retry the permanent deletion."
+            )
+
+        cursor.execute(
+            f"DELETE FROM slot_inventory_outbox WHERE slot_id IN ({placeholders})",
+            tuple(slot_ids),
+        )
+
+        cursor.execute(
+            f"DELETE FROM slots WHERE slot_id IN ({placeholders})",
+            tuple(slot_ids),
+        )
+
+    cursor.execute(
+        """
+        DELETE FROM doctor_availability_patterns
+        WHERE doctor_id = %s AND consultation_type_id = %s
+        """,
+        (doctor_id, type_id),
+    )
+    deleted_patterns = cursor.rowcount
+
+    cursor.execute(
+        """
+        DELETE FROM consultation_types
+        WHERE consultation_type_id = %s AND doctor_id = %s
+        """,
+        (type_id, doctor_id),
+    )
+    if cursor.rowcount != 1:
+        raise LookupError("Consultation type not found")
+
+    return {
+        "slots_deleted": len(slot_ids),
+        "availability_patterns_deleted": deleted_patterns,
+        "_slot_ids_for_inventory_cleanup": slot_ids,
+    }
 
 
 def handler(event, context):
@@ -437,11 +552,26 @@ def handler(event, context):
             if not type_id:
                 raise ValueError("consultationTypeId is required")
 
-            disable_type(connection, doctor_id, type_id)
+            with connection.cursor() as cursor:
+                deleted = delete_type(cursor, doctor_id, type_id)
             connection.commit()
 
+            slot_ids = deleted.pop("_slot_ids_for_inventory_cleanup", [])
+            inventory_cleanup_pending = False
+            try:
+                with slot_inventory_table.batch_writer() as batch:
+                    for slot_id in slot_ids:
+                        batch.delete_item(Key={"slotId": str(slot_id)})
+            except Exception:
+                # SQL is the source of truth. A failed inventory cleanup does
+                # not restore a deleted service; surface the warning for ops.
+                inventory_cleanup_pending = True
+                logger.exception("DynamoDB slot inventory cleanup failed after consultation type deletion")
+
             return response(200, {
-                "message": "Consultation type disabled"
+                "message": "Consultation type permanently deleted",
+                "inventory_cleanup_pending": inventory_cleanup_pending,
+                **deleted,
             })
 
         return response(405, {"message": "Method not allowed"})

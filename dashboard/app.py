@@ -4,6 +4,7 @@ import hmac
 import secrets
 import logging
 import uuid
+import calendar
 from datetime import date, datetime, timedelta
 from functools import wraps
 from pathlib import Path
@@ -25,6 +26,15 @@ from flask_session import Session
 
 
 IST = ZoneInfo("Asia/Kolkata")
+
+
+def shift_calendar_month(value, offset):
+    """Move by whole calendar months, clamping the day to the target month."""
+    month_index = value.year * 12 + (value.month - 1) + offset
+    year, month_zero_based = divmod(month_index, 12)
+    month = month_zero_based + 1
+    day = min(value.day, calendar.monthrange(year, month)[1])
+    return date(year, month, day)
 app = Flask(__name__)
 
 secret_key = os.environ.get("FLASK_SECRET_KEY")
@@ -560,7 +570,13 @@ def patient_cancel_appointment(appointment_id):
         "POST", f"/appointments/{appointment_id}/cancel", json={"reason": reason}
     )
     if status == 200:
-        flash("Appointment cancelled successfully.", "success")
+        flash(
+            "Appointment cancelled. "
+            f"₹{data.get('refund_amount', '0.00')} ({data.get('refund_percentage', '0')}%) "
+            "Any positive refund amount is recorded in MediSlot's refund ledger; "
+            "this workflow does not initiate a payment transfer.",
+            "success",
+        )
     else:
         flash(data.get("message", "Unable to cancel appointment."), "error")
     return redirect(url_for("patient_appointments"))
@@ -676,7 +692,7 @@ def deactivate_patient_account():
         flash(
             data.get(
                 "message",
-                "You cannot delete your account while active appointments exist."
+                "You cannot deactivate your account while active appointments exist."
             ),
             "error"
         )
@@ -747,6 +763,46 @@ def doctor_cancel_appointment(appointment_id):
     else:
         flash(data.get("message", "Unable to cancel appointment."), "error")
     return redirect(url_for("doctor_appointments"))
+
+
+@app.route("/doctor/appointments/<int:appointment_id>/check-in", methods=["POST"])
+@doctor_required
+def doctor_check_in_appointment(appointment_id):
+    if not dashboard_csrf_valid():
+        flash("Your request could not be verified. Refresh the page and try again.", "error")
+    else:
+        data, status = call_doctor_api(
+            "POST", f"/appointments/{appointment_id}/check-in", json={}
+        )
+        if status == 200:
+            flash("Patient marked as arrived.", "success")
+        else:
+            flash(data.get("message", "Unable to check in this patient."), "error")
+    return redirect(url_for(
+        "schedule",
+        date=request.form.get("schedule_date") or None,
+        view=request.form.get("calendar_view") or None,
+    ))
+
+
+@app.route("/doctor/appointments/<int:appointment_id>/complete", methods=["POST"])
+@doctor_required
+def doctor_complete_appointment(appointment_id):
+    if not dashboard_csrf_valid():
+        flash("Your request could not be verified. Refresh the page and try again.", "error")
+    else:
+        data, status = call_doctor_api(
+            "POST", f"/appointments/{appointment_id}/complete", json={}
+        )
+        if status == 200:
+            flash("Consultation marked as completed.", "success")
+        else:
+            flash(data.get("message", "Unable to complete this consultation."), "error")
+    return redirect(url_for(
+        "schedule",
+        date=request.form.get("schedule_date") or None,
+        view=request.form.get("calendar_view") or None,
+    ))
 
 
 @app.route("/doctor/slots/<int:slot_id>/cancel", methods=["POST"])
@@ -1105,14 +1161,21 @@ def update_consultation_type(type_id):
     return redirect(url_for("consultation_types"))
 
 
-@app.route("/consultation-types/<int:type_id>/disable", methods=["POST"])
+@app.route("/consultation-types/<int:type_id>/delete", methods=["POST"])
 @doctor_required
-def disable_consultation_type(type_id):
+def delete_consultation_type(type_id):
     data, status = call_doctor_api("DELETE", f"/doctor/consultation-types/{type_id}")
     if status == 200:
-        flash("Consultation type disabled.", "success")
+        flash(
+            "Consultation type permanently deleted. "
+            f"{data.get('slots_deleted', 0)} generated slot(s) and "
+            f"{data.get('availability_patterns_deleted', 0)} availability pattern(s) removed.",
+            "success" if not data.get("inventory_cleanup_pending") else "warning",
+        )
+        if data.get("inventory_cleanup_pending"):
+            flash("The service was removed from MySQL, but one or more cached slot inventory items still need cleanup. Check the consultation-types Lambda logs.", "warning")
     else:
-        flash(data.get("message", "Unable to disable consultation type."), "error")
+        flash(data.get("message", "Unable to delete consultation type."), "error")
     return redirect(url_for("consultation_types"))
 
 
@@ -1193,7 +1256,14 @@ def update_availability(pattern_id):
         "PUT", f"/doctor/availability-patterns/{pattern_id}", json=payload
     )
     if status == 200:
-        flash("Availability pattern updated.", "success")
+        flash(
+            "Availability updated. "
+            f"{data.get('slots_created', 0)} slot(s) created, "
+            f"{data.get('slots_cancelled', 0)} obsolete slot(s) cancelled, "
+            f"{data.get('slots_reopened', 0)} slot(s) reopened. "
+            "Booked appointments are preserved.",
+            "success",
+        )
     else:
         flash(data.get("message", "Unable to update availability pattern."), "error")
     return redirect(url_for("availability"))
@@ -1206,9 +1276,14 @@ def deactivate_availability(pattern_id):
         "DELETE", f"/doctor/availability-patterns/{pattern_id}"
     )
     if status == 200:
-        flash("Availability pattern deactivated.", "success")
+        flash(
+            "Availability pattern removed. "
+            f"{data.get('slots_cancelled', 0)} future unbooked slot(s) cancelled. "
+            "Already-booked appointments are preserved.",
+            "success",
+        )
     else:
-        flash(data.get("message", "Unable to deactivate availability pattern."), "error")
+        flash(data.get("message", "Unable to remove availability pattern."), "error")
     return redirect(url_for("availability"))
 
 
@@ -1362,13 +1437,17 @@ def schedule():
         selected_day=selected_day,
         today_iso=datetime.now(IST).date().isoformat(),
         previous_date=(
-            selected_day
-            - timedelta(days=1 if view == "day" else 7 if view == "week" else 30)
+            selected_day - timedelta(days=1) if view == "day"
+            else selected_day - timedelta(days=7) if view == "week"
+            else shift_calendar_month(selected_day.replace(day=1), -1)
         ).isoformat(),
         next_date=(
-            selected_day
-            + timedelta(days=1 if view == "day" else 7 if view == "week" else 30)
+            selected_day + timedelta(days=1) if view == "day"
+            else selected_day + timedelta(days=7) if view == "week"
+            else shift_calendar_month(selected_day.replace(day=1), 1)
         ).isoformat(),
+        previous_period_label=("Previous day" if view == "day" else "Previous week" if view == "week" else "Previous month"),
+        next_period_label=("Next day" if view == "day" else "Next week" if view == "week" else "Next month"),
         calendar_view=view,
         display_title=display_title,
         range_start=range_start,
@@ -1384,15 +1463,31 @@ def schedule():
 @app.route("/blackout-dates", methods=["GET", "POST"])
 @doctor_required
 def blackout_dates():
+    preview_data = None
+    form_values = {"start_at": "", "end_at": "", "reason": ""}
+
     if request.method == "POST":
+        if not dashboard_csrf_valid():
+            flash("Your request could not be verified. Refresh the page and try again.", "error")
+            return redirect(url_for("blackout_dates"))
+
         start_value = request.form.get("start_at", "").strip()
         end_value = request.form.get("end_at", "").strip()
         reason = request.form.get("reason", "").strip()
+        form_values = {
+            "start_at": start_value,
+            "end_at": end_value,
+            "reason": reason,
+        }
         try:
             start_at = datetime.fromisoformat(start_value)
             end_at = datetime.fromisoformat(end_value)
             if end_at <= start_at:
                 raise ValueError("The end date/time must be later than the start date/time.")
+            if start_at.tzinfo:
+                start_at = start_at.astimezone(IST).replace(tzinfo=None)
+            if end_at.tzinfo:
+                end_at = end_at.astimezone(IST).replace(tzinfo=None)
         except ValueError as exc:
             flash(str(exc) or "Enter valid blackout date/time values.", "error")
             return redirect(url_for("blackout_dates"))
@@ -1402,16 +1497,34 @@ def blackout_dates():
             "end_at": end_at.isoformat(timespec="minutes"),
             "reason": reason or None,
         }
-        data, status = call_doctor_api(
-            "POST", "/doctor/blackout-dates", json=payload
-        )
-        if status == 201:
-            flash(
-                f"Blackout period created. {data.get('slots_blocked', 0)} open slot(s) were blocked.",
-                "success",
+
+        if request.form.get("confirm_blackout") == "1":
+            data, status = call_doctor_api(
+                "POST", "/doctors/me/blackouts/activate", json=payload
             )
-            return redirect(url_for("blackout_dates"))
-        flash(data.get("message", "Unable to create blackout period."), "error")
+            if status == 201:
+                flash(
+                    "Blackout activated. "
+                    f"{data.get('slots_blocked', 0)} slot(s) blocked, "
+                    f"{data.get('appointments_cancelled', 0)} appointment(s) cancelled, "
+                    f"total refund entitlement: ₹{data.get('refund_total', '0.00')}. "
+                    "Positive amounts are recorded in the refund ledger; no payment transfer is initiated here.",
+                    "success",
+                )
+                return redirect(url_for("blackout_dates"))
+            flash(data.get("message", "Unable to activate the blackout period."), "error")
+            preview_data, preview_status = call_doctor_api(
+                "POST", "/doctors/me/blackouts/preview", json=payload
+            )
+            if preview_status != 200:
+                preview_data = None
+        else:
+            preview_data, status = call_doctor_api(
+                "POST", "/doctors/me/blackouts/preview", json=payload
+            )
+            if status != 200:
+                flash(preview_data.get("message", "Unable to preview the blackout period."), "error")
+                preview_data = None
 
     data, status = call_doctor_api("GET", "/doctor/blackout-dates")
     blackouts = data.get("blackout_dates", []) if status == 200 else []
@@ -1422,9 +1535,11 @@ def blackout_dates():
         "blackout_dates.html",
         blackout_dates=blackouts,
         blackouts_loaded=status == 200,
+        blackout_preview=preview_data,
+        blackout_form_values=form_values,
+        csrf_token=dashboard_csrf_token(),
         active_page="blackout_dates",
     )
-
 
 @app.route("/logout", methods=["GET", "POST"])
 def logout():

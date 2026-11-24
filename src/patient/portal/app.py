@@ -214,7 +214,7 @@ def _deactivate_profile(event):
                         INNER JOIN slots sl
                             ON sl.slot_id = a.slot_id
                         WHERE a.patient_id=%s
-                          AND a.status='CONFIRMED'
+                          AND a.status IN ('CONFIRMED', 'CHECKED_IN')
                           AND sl.end_at > %s
                         LIMIT 1
                         FOR UPDATE
@@ -232,7 +232,7 @@ def _deactivate_profile(event):
                             {
                                 "code": "ACTIVE_APPOINTMENTS_EXIST",
                                 "message": (
-                                    "Your account cannot be deleted "
+                                    "Your account cannot be deactivated "
                                     "while you have active appointments. "
                                     "Please complete or cancel your "
                                     "appointments before trying again."
@@ -502,7 +502,8 @@ def _doctor_slots(event):
     except (TypeError, ValueError):
         return response(400, {"message": "A valid doctor ID is required."})
     q = _query(event)
-    today_ist = datetime.now(ZoneInfo("Asia/Kolkata")).date()
+    now_ist = datetime.now(ZoneInfo("Asia/Kolkata")).replace(tzinfo=None)
+    today_ist = now_ist.date()
     start_date = q.get("start_date") or today_ist.isoformat()
     end_date = q.get("end_date") or (today_ist + timedelta(days=30)).isoformat()
     try:
@@ -512,6 +513,11 @@ def _doctor_slots(event):
         return response(400, {"message": "Dates must use YYYY-MM-DD format."})
 
     requested_end_date = (end - timedelta(days=1)).date()
+
+    # For today's availability, only return slots that have not started yet.
+    # Future dates continue to use midnight as their inclusive lower bound.
+    if start.date() == today_ist:
+        start = now_ist
 
     if start.date() < today_ist or requested_end_date < today_ist:
         return response(

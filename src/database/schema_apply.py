@@ -267,6 +267,69 @@ def ensure_slot_inventory_schema(cursor):
 
     return changes
 
+
+def ensure_schedule_and_attendance_schema(cursor):
+    """Add slot closure metadata and doctor attendance timestamps/status."""
+    changes = 0
+
+    column_definitions = {
+        "slots": {
+            "closure_reason": "VARCHAR(40) NULL",
+        },
+        "appointments": {
+            "checked_in_at": "DATETIME NULL",
+            "completed_at": "DATETIME NULL",
+        },
+    }
+
+    for table_name, columns in column_definitions.items():
+        for column_name, definition in columns.items():
+            cursor.execute(
+                """
+                SELECT COUNT(*)
+                FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME = %s
+                  AND COLUMN_NAME = %s
+                """,
+                (table_name, column_name),
+            )
+            if cursor.fetchone()[0] == 0:
+                cursor.execute(
+                    f"ALTER TABLE `{table_name}` "
+                    f"ADD COLUMN `{column_name}` {definition}"
+                )
+                changes += 1
+
+    cursor.execute(
+        """
+        SELECT COLUMN_TYPE
+        FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME = 'appointments'
+          AND COLUMN_NAME = 'status'
+        """
+    )
+    status_column = cursor.fetchone()
+    if status_column and "CHECKED_IN" not in status_column[0]:
+        cursor.execute(
+            """
+            ALTER TABLE appointments
+            MODIFY COLUMN status ENUM(
+                'CONFIRMED',
+                'CHECKED_IN',
+                'COMPLETED',
+                'CANCELLED_BY_PATIENT',
+                'CANCELLED_BY_DOCTOR',
+                'NO_SHOW'
+            ) NOT NULL DEFAULT 'CONFIRMED'
+            """
+        )
+        changes += 1
+
+    return changes
+
+
 def handler(event, context):
     """Apply the MediSlot schema and idempotent reference-data seed."""
 
@@ -314,6 +377,9 @@ def handler(event, context):
             slot_inventory_migration_changes = (
                 ensure_slot_inventory_schema(cursor)
             )
+            schedule_attendance_migration_changes = (
+                ensure_schedule_and_attendance_schema(cursor)
+            )
 
             seed_statements = execute_sql_file(cursor, seed_path)
 
@@ -321,6 +387,7 @@ def handler(event, context):
             patient_migration_changes
             + appointment_migration_changes
             + slot_inventory_migration_changes
+            + schedule_attendance_migration_changes
         )
 
         logger.info(
@@ -328,13 +395,15 @@ def handler(event, context):
             "schema_statements=%s seed_statements=%s "
             "patient_migration_changes=%s "
             "appointment_migration_changes=%s "
-            "slot_inventory_migration_changes=%s",
+            "slot_inventory_migration_changes=%s "
+            "schedule_attendance_migration_changes=%s",
             db_name,
             schema_statements,
             seed_statements,
             patient_migration_changes,
             appointment_migration_changes,
             slot_inventory_migration_changes,
+            schedule_attendance_migration_changes,
         )
 
         return {
@@ -347,6 +416,7 @@ def handler(event, context):
                 appointment_migration_changes
             ),
             "slot_inventory_migration_changes": slot_inventory_migration_changes,
+            "schedule_attendance_migration_changes": schedule_attendance_migration_changes,
             "migration_changes": migration_changes,
         }
     finally:

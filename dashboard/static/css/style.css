@@ -2996,3 +2996,71 @@ input:disabled {
 .appointment-detail-grid div { border: 1px solid var(--border-color, #e5e7eb); border-radius: 0.6rem; padding: 0.8rem; }
 .appointment-detail-grid dt { color: var(--text-muted, #667085); font-size: 0.8rem; margin-bottom: 0.3rem; }
 .appointment-detail-grid dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+
+
+/* Patient account deactivation dialog */
+.patient-danger-zone {
+    margin-top: 34px;
+    padding: 26px;
+    border: 1px solid color-mix(in srgb, #b42318 42%, var(--border));
+    border-radius: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 28px;
+    background: color-mix(in srgb, #b42318 4%, var(--surface));
+}
+.patient-danger-content { flex: 1; min-width: 0; }
+.patient-danger-content h3 { margin: 8px 0 10px; color: #b42318; }
+.patient-danger-content p { max-width: 760px; color: var(--muted); line-height: 1.65; }
+.patient-deactivation-points { margin: 14px 0 0; padding-left: 20px; color: var(--muted); line-height: 1.8; }
+.patient-delete-button { background: #b42318; color: #fff; border: 1px solid #b42318; white-space: nowrap; }
+.patient-delete-button:hover { background: #912018; border-color: #912018; }
+.patient-deactivation-dialog {
+    width: min(520px, calc(100% - 32px));
+    max-width: 520px;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    color: var(--text);
+    background: var(--surface);
+    box-shadow: 0 24px 80px rgba(0, 0, 0, .28);
+}
+.patient-deactivation-dialog::backdrop { background: rgba(8, 18, 28, .62); backdrop-filter: blur(3px); }
+.patient-deactivation-dialog-content { padding: 30px; }
+.patient-deactivation-icon { display: inline-grid; place-items: center; width: 38px; height: 38px; margin-bottom: 18px; border-radius: 50%; color: #b42318; background: rgba(180, 35, 24, .12); font-weight: 800; }
+.patient-deactivation-dialog h3 { margin: 8px 0 12px; }
+.patient-deactivation-dialog p:not(.eyebrow) { color: var(--muted); line-height: 1.65; }
+.patient-deactivation-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 10px; margin-top: 26px; }
+:root[data-theme="dark"] .patient-danger-zone { background: color-mix(in srgb, #b42318 9%, var(--surface)); border-color: #8f4a4a; }
+:root[data-theme="dark"] .patient-danger-content h3 { color: #ff9999; }
+@media (max-width: 700px) {
+    .patient-danger-zone { flex-direction: column; align-items: stretch; padding: 20px; }
+    .patient-danger-zone > .patient-delete-button { width: 100%; }
+    .patient-deactivation-dialog-content { padding: 22px; }
+    .patient-deactivation-actions { flex-direction: column-reverse; }
+    .patient-deactivation-actions .btn { width: 100%; }
+}
+
+.consultation-delete-warning { margin: 22px 0 12px; padding: 14px 16px; border: 1px solid var(--border); border-left: 3px solid #b42318; border-radius: 10px; background: var(--surface-soft, var(--surface)); }
+.consultation-delete-warning strong { display: block; margin-bottom: 5px; }
+.consultation-delete-warning p { margin: 0; line-height: 1.55; }
+
+.ms-calendar-nav-label { font-size: .78rem; }
+.ms-attendance-action { display: inline-flex; margin: 8px 6px 0 0; }
+.appointment-management-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+@media (max-width: 700px) { .ms-calendar-nav-label { display: none; } }
+
+.blackout-impact-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 18px 0 22px; }
+.blackout-impact-summary > div { display: flex; flex-direction: column; gap: 5px; padding: 15px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-soft, var(--surface)); }
+.blackout-impact-summary strong { font-size: 1.2rem; }
+.blackout-impact-summary span { color: var(--muted); font-size: .82rem; }
+.blackout-confirm-form { display: flex; justify-content: flex-end; margin-top: 22px; }
+.notice-warning { border-color: #d69b35; background: color-mix(in srgb, #d69b35 9%, var(--surface)); }
+@media (max-width: 760px) { .blackout-impact-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); } .blackout-confirm-form .btn { width: 100%; } }
+@media (max-width: 420px) { .blackout-impact-summary { grid-template-columns: 1fr; } }
+
+.appointment-cancel-quote { display: flex; flex-direction: column; gap: 4px; margin: 8px 0 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-soft, var(--surface)); }
+.appointment-cancel-quote small { color: var(--muted); line-height: 1.5; }
+
+.ms-attendance-note { display: inline-block; margin: 8px 0 0; color: var(--muted); font-size: .78rem; }
