@@ -22,10 +22,8 @@ DB_HOST = os.environ["DB_HOST"]
 DB_NAME = os.getenv("DB_NAME", "medislot")
 DB_USER = os.environ["DB_USER"]
 DB_PASSWORD_PARAMETER = os.environ["DB_PASSWORD_PARAMETER"]
-SLOT_INVENTORY_TABLE = os.environ["SLOT_INVENTORY_TABLE"]
 IDEMPOTENCY_TABLE = os.environ["IDEMPOTENCY_TABLE"]
 
-inventory_table = dynamodb.Table(SLOT_INVENTORY_TABLE)
 idempotency_table = dynamodb.Table(IDEMPOTENCY_TABLE)
 IST = ZoneInfo("Asia/Kolkata")
 IDEMPOTENCY_TTL_SECONDS = 24 * 60 * 60
@@ -188,58 +186,6 @@ def enqueue_slot_inventory(cursor, slot_id):
     return int(row["inventory_version"])
 
 
-def inventory_reserve(slot_id):
-    try:
-        inventory_table.update_item(
-            Key={"slotId": str(slot_id)},
-            UpdateExpression=(
-                "SET confirmedCount = confirmedCount + :one, "
-                "availableCount = availableCount - :one, "
-                "updatedAt = :now, #version = if_not_exists(#version, :zero) + :one"
-            ),
-            ConditionExpression=(
-                "#status = :open AND availableCount >= :one "
-                "AND attribute_exists(slotId)"
-            ),
-            ExpressionAttributeNames={
-                "#status": "status",
-                "#version": "version",
-            },
-            ExpressionAttributeValues={
-                ":one": 1,
-                ":zero": 0,
-                ":open": "OPEN",
-                ":now": datetime.now(IST).isoformat(),
-            },
-        )
-    except ClientError as exc:
-        code = exc.response.get("Error", {}).get("Code")
-        if code == "ConditionalCheckFailedException":
-            raise ApiError(409, "This slot is no longer available")
-        raise
-
-
-def inventory_release(slot_id):
-    try:
-        inventory_table.update_item(
-            Key={"slotId": str(slot_id)},
-            UpdateExpression=(
-                "SET confirmedCount = confirmedCount - :one, "
-                "availableCount = availableCount + :one, "
-                "updatedAt = :now, #version = if_not_exists(#version, :zero) + :one"
-            ),
-            ConditionExpression="confirmedCount >= :one AND attribute_exists(slotId)",
-            ExpressionAttributeNames={"#version": "version"},
-            ExpressionAttributeValues={
-                ":one": 1,
-                ":zero": 0,
-                ":now": datetime.now(IST).isoformat(),
-            },
-        )
-    except ClientError:
-        logger.exception("Unable to release slot inventory for slot %s", slot_id)
-        raise
-
 
 def claim_idempotency(key, patient_id, request_hash):
     now = int(datetime.now(IST).timestamp())
@@ -324,7 +270,8 @@ def create_appointment(cursor, patient_id, slot_id):
         """
         SELECT
             s.slot_id, s.doctor_id, s.consultation_type_id,
-            s.start_at, s.end_at, s.capacity, s.booked_count, s.status,
+            s.start_at, s.end_at, s.capacity, s.booked_count,
+            s.active_hold_count, s.status,
             ct.consultation_fee, ct.status AS consultation_status,
             d.status AS doctor_status, p.status AS patient_status
         FROM slots s
@@ -349,7 +296,10 @@ def create_appointment(cursor, patient_id, slot_id):
         raise ApiError(409, "Slot is not open for booking")
     if slot["start_at"] <= now:
         raise ApiError(409, "Past or already-started slots cannot be booked")
-    if int(slot["booked_count"]) >= int(slot["capacity"]):
+    if (
+        int(slot["booked_count"]) + int(slot["active_hold_count"])
+        >= int(slot["capacity"])
+    ):
         raise ApiError(409, "This slot is fully booked")
 
     cursor.execute(
@@ -384,9 +334,17 @@ def create_appointment(cursor, patient_id, slot_id):
     appointment_id = cursor.lastrowid
 
     cursor.execute(
-        "UPDATE slots SET booked_count = booked_count + 1 WHERE slot_id = %s",
+        """
+        UPDATE slots
+        SET booked_count = booked_count + 1
+        WHERE slot_id = %s
+        AND status = 'OPEN'
+        AND booked_count + active_hold_count < capacity
+        """,
         (slot_id,),
     )
+    if cursor.rowcount != 1:
+        raise ApiError(409, "This slot is no longer available")
     enqueue_slot_inventory(cursor, slot_id)
     cursor.execute(
         """
@@ -695,7 +653,6 @@ def cancel_doctor_slot(cursor, slot_id, doctor_id, reason):
 
 def handler(event, context):
     connection = None
-    reserved_slot_id = None
     idempotency_key = None
     sql_committed = False
 
@@ -723,11 +680,6 @@ def handler(event, context):
             replay = claim_idempotency(idempotency_key, user_id, request_hash)
             if replay:
                 return response(200, replay)
-
-            # Reserve capacity in DynamoDB first. If the SQL transaction fails,
-            # release the reservation as compensation.
-            inventory_reserve(slot_id)
-            reserved_slot_id = slot_id
 
             connection = get_connection()
             with connection.cursor() as cursor:
@@ -777,7 +729,6 @@ def handler(event, context):
                     cursor, appointment_id, int(user_id), role, reason
                 )
             connection.commit()
-            inventory_release(slot_id)
             return response(200, result)
 
         if method == "POST" and path.startswith("/doctors/me/slots/") and path.endswith("/cancel"):
@@ -794,29 +745,6 @@ def handler(event, context):
                     cursor, slot_id, int(user_id), reason
                 )
             connection.commit()
-            # Slot remains unavailable; only its status is changed in inventory.
-            inventory_table.update_item(
-                Key={"slotId": str(slot_id)},
-                UpdateExpression=(
-                    "SET #status = :cancelled, "
-                    "confirmedCount = :zero, "
-                    "activeHoldCount = :zero, "
-                    "availableCount = :zero, "
-                    "updatedAt = :now, "
-                    "#version = if_not_exists(#version, :zero) + :one"
-                ),
-                ExpressionAttributeNames={
-                    "#status": "status",
-                    "#version": "version",
-                },
-                ExpressionAttributeValues={
-                    ":cancelled": "CANCELLED",
-                    ":zero": 0,
-                    ":one": 1,
-                    ":now": datetime.now(IST).isoformat(),
-                },
-                ConditionExpression="attribute_exists(slotId)",
-            )
             return response(200, {
                 "slot_id": slot_id,
                 "status": "CANCELLED",
@@ -829,11 +757,6 @@ def handler(event, context):
     except ApiError as exc:
         if connection:
             connection.rollback()
-        if reserved_slot_id is not None and not sql_committed:
-            try:
-                inventory_release(reserved_slot_id)
-            except Exception:
-                logger.exception("Compensation failed for slot %s", reserved_slot_id)
         if idempotency_key and not sql_committed:
             fail_idempotency(idempotency_key)
         return response(exc.status, {"message": exc.message})
@@ -841,11 +764,6 @@ def handler(event, context):
     except Exception:
         if connection:
             connection.rollback()
-        if reserved_slot_id is not None and not sql_committed:
-            try:
-                inventory_release(reserved_slot_id)
-            except Exception:
-                logger.exception("Compensation failed for slot %s", reserved_slot_id)
         if idempotency_key and not sql_committed:
             fail_idempotency(idempotency_key)
         logger.exception("Appointment API request failed")

@@ -4,7 +4,6 @@ import json
 import logging
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from common.slot_inventory import update_slot_status
 
 import boto3
 import pymysql
@@ -124,9 +123,6 @@ def handler(event, context):
                 enqueue_slot_inventory(cursor, int(slot_id))
 
         connection.commit()
-
-        for slot_id in completed_slot_ids:
-            update_slot_status(slot_id, "COMPLETED")
 
         logger.info(
             "Slot maintenance completed. Updated %s slots.",

@@ -4,7 +4,6 @@ import json
 import logging
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
-from common.slot_inventory import sync_slot
 
 import boto3
 import pymysql
@@ -106,57 +105,6 @@ def overlaps(start_a, end_a, start_b, end_b):
     return start_a < end_b and end_a > start_b
 
 
-def sync_all_slot_inventory(cursor):
-    """
-    Backfill and reconcile DynamoDB inventory metadata from MySQL.
-
-    Existing DynamoDB booking counters are preserved by sync_slot().
-    """
-    cursor.execute(
-        """
-        SELECT
-            slot_id,
-            doctor_id,
-            consultation_type_id,
-            start_at,
-            end_at,
-            capacity,
-            booked_count,
-            status
-        FROM slots
-        ORDER BY slot_id
-        """
-    )
-
-    created = 0
-    updated = 0
-
-    while True:
-        rows = cursor.fetchmany(100)
-
-        if not rows:
-            break
-
-        for slot in rows:
-            result = sync_slot(slot)
-
-            if result == "CREATED":
-                created += 1
-            else:
-                updated += 1
-
-    logger.info(
-        "Slot inventory backfill completed. Created=%s Updated=%s",
-        created,
-        updated,
-    )
-
-    return {
-        "created": created,
-        "updated": updated,
-    }
-
-
 def handler(event, context):
     connection = None
 
@@ -198,8 +146,6 @@ def handler(event, context):
             # End the discovery transaction. Each doctor gets
             # an independent transaction and a fresh read snapshot.
             connection.commit()
-
-            inventory_slots = []
 
             for doctor_id in doctor_ids:
 
@@ -397,17 +343,6 @@ def handler(event, context):
                                 slot_id = int(cursor.lastrowid)
                                 enqueue_slot_inventory(cursor, slot_id)
 
-                                inventory_slots.append({
-                                    "slot_id": slot_id,
-                                    "doctor_id": doctor_id,
-                                    "consultation_type_id": pattern["consultation_type_id"],
-                                    "start_at": slot_start,
-                                    "end_at": slot_end,
-                                    "capacity": int(pattern["capacity"]),
-                                    "booked_count": 0,
-                                    "status": "OPEN",
-                                })
-
                                 generated_count += 1
 
                                 existing_slots.append({
@@ -424,12 +359,6 @@ def handler(event, context):
                 # Release this doctor's lock before processing
                 # the next doctor.
                 connection.commit()
-                for inventory_slot in inventory_slots:
-                    sync_slot(inventory_slot)
-
-                inventory_slots.clear()
-
-            inventory_sync = sync_all_slot_inventory(cursor)
 
         result = {
             "message": "Slot materialisation completed",
@@ -440,7 +369,6 @@ def handler(event, context):
                 window_end - timedelta(days=1)
             ).isoformat(),
             "timezone": "Asia/Kolkata",
-            "inventory_sync": inventory_sync,
         }
 
         logger.info(json.dumps(result))

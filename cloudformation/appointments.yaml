@@ -74,16 +74,6 @@ Resources:
                 Resource:
                   - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${ProjectName}/${Environment}/database/password'
 
-              - Sid: ManageSlotInventory
-                Effect: Allow
-                Action:
-                  - dynamodb:GetItem
-                  - dynamodb:PutItem
-                  - dynamodb:UpdateItem
-                  - dynamodb:DeleteItem
-                Resource:
-                  - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${SlotInventoryTableName}'
-
               - Sid: ManageIdempotencyRecords
                 Effect: Allow
                 Action:
@@ -130,7 +120,6 @@ Resources:
           DB_USER: !Ref DatabaseUsername
           DB_PASSWORD_PARAMETER: !Sub '/${ProjectName}/${Environment}/database/password'
 
-          SLOT_INVENTORY_TABLE: !Ref SlotInventoryTableName
           IDEMPOTENCY_TABLE: !Ref IdempotencyTableName
 
           LOG_LEVEL: INFO

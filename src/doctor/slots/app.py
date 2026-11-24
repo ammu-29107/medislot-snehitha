@@ -4,7 +4,6 @@ import json
 import logging
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
-from common.slot_inventory import sync_slot, update_slot_status
 from zoneinfo import ZoneInfo
 
 import boto3
@@ -349,7 +348,7 @@ def create_blackout(cursor, doctor_id, data):
 
     cursor.execute(
         """
-        SELECT slot_id, booked_count
+        SELECT slot_id, booked_count, active_hold_count
         FROM slots
         WHERE doctor_id = %s
           AND start_at < %s
@@ -362,10 +361,14 @@ def create_blackout(cursor, doctor_id, data):
 
     affected_slots = cursor.fetchall()
 
-    if any(int(slot["booked_count"]) > 0 for slot in affected_slots):
+    if any(
+        int(slot["booked_count"]) > 0
+        or int(slot["active_hold_count"]) > 0
+        for slot in affected_slots
+    ):
         raise SchedulingConflictError(
-            "Blackout affects booked slots. "
-            "Use the leave cancellation workflow first."
+            "Blackout affects booked or held slots. "
+            "Resolve those appointments or holds first."
         )
 
     cursor.execute(
@@ -396,17 +399,12 @@ def create_blackout(cursor, doctor_id, data):
         (doctor_id, end_at, start_at),
     )
 
+    blocked_count = cursor.rowcount
+
     for slot in affected_slots:
         enqueue_slot_inventory(cursor, int(slot["slot_id"]))
 
-    return (
-        blackout_id,
-        cursor.rowcount,
-        [
-            str(slot["slot_id"])
-            for slot in affected_slots
-        ],
-    )
+    return blackout_id, blocked_count
 
 
 def list_blackouts(cursor, doctor_id):
@@ -472,14 +470,11 @@ def handler(event, context):
                 slot = create_slot(cursor, doctor_id, data)
                 connection.commit()
 
-                sync_result = sync_slot(slot)
-
                 return response(201, {
                     "message": "Slot created",
                     "slot_id": slot["slot_id"],
                     "end_at": slot["end_at"],
                     "status": "OPEN",
-                    "inventory_sync": sync_result,
                 })
 
             if is_blackout_route and method == "GET":
@@ -489,13 +484,10 @@ def handler(event, context):
 
             if is_blackout_route and method == "POST":
                 data = get_body(event)
-                blackout_id, blocked_count, blocked_slot_ids = (
-                    create_blackout(cursor, doctor_id, data)
+                blackout_id, blocked_count = create_blackout(
+                    cursor, doctor_id, data
                 )
                 connection.commit()
-
-                for slot_id in blocked_slot_ids:
-                    update_slot_status(slot_id, "BLOCKED")
 
                 return response(201, {
                     "message": "Blackout created",
