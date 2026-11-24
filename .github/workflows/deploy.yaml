@@ -1375,6 +1375,26 @@ jobs:
             zip -qr "$RUNNER_TEMP/appointments-api.zip" .
           )
 
+      - name: Package appointment outbox publisher Lambda
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          PACKAGE_DIR="$RUNNER_TEMP/appointments-outbox-publisher"
+          mkdir -p "$PACKAGE_DIR"
+
+          python -m pip install \
+            --disable-pip-version-check \
+            -r src/appointments/outbox_publisher/requirements.txt \
+            --target "$PACKAGE_DIR"
+
+          cp src/appointments/outbox_publisher/app.py "$PACKAGE_DIR/app.py"
+
+          (
+            cd "$PACKAGE_DIR"
+            zip -qr "$RUNNER_TEMP/appointments-outbox-publisher.zip" .
+          )
+
       - name: Upload appointment API package
         id: package
         shell: bash
@@ -1391,6 +1411,22 @@ jobs:
 
           echo "appointments_api_key=${KEY}" >> "$GITHUB_OUTPUT"
 
+      - name: Upload appointment outbox publisher package
+        id: outbox_package
+        shell: bash
+        env:
+          ARTIFACTS_BUCKET: ${{ steps.data.outputs.artifacts_bucket }}
+        run: |
+          set -euo pipefail
+
+          KEY="lambda/appointments/outbox-publisher-${GITHUB_SHA}.zip"
+
+          aws s3 cp \
+            "$RUNNER_TEMP/appointments-outbox-publisher.zip" \
+            "s3://${ARTIFACTS_BUCKET}/${KEY}"
+
+          echo "outbox_publisher_key=${KEY}" >> "$GITHUB_OUTPUT"
+
       - name: Deploy appointments stack
         shell: bash
         env:
@@ -1404,6 +1440,7 @@ jobs:
           SLOT_INVENTORY_TABLE: ${{ steps.data.outputs.slot_inventory_table }}
           IDEMPOTENCY_TABLE: ${{ steps.data.outputs.idempotency_table }}
           APPOINTMENTS_API_KEY: ${{ steps.package.outputs.appointments_api_key }}
+          OUTBOX_PUBLISHER_KEY: ${{ steps.outbox_package.outputs.outbox_publisher_key }}
         run: |
           set -euo pipefail
 
@@ -1420,6 +1457,7 @@ jobs:
               SlotInventoryTableName="$SLOT_INVENTORY_TABLE" \
               IdempotencyTableName="$IDEMPOTENCY_TABLE" \
               AppointmentsApiCodeKey="$APPOINTMENTS_API_KEY" \
+              OutboxPublisherCodeKey="$OUTBOX_PUBLISHER_KEY" \
             --region "$REGION" \
             --capabilities CAPABILITY_NAMED_IAM \
             --no-fail-on-empty-changeset

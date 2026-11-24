@@ -32,6 +32,10 @@ Parameters:
     Type: String
     Description: S3 key for the packaged appointment API Lambda
 
+  OutboxPublisherCodeKey:
+    Type: String
+    Description: S3 key for the packaged outbox publisher Lambda
+
 Resources:
 
   # --------------------------------------------------
@@ -126,6 +130,112 @@ Resources:
           IDEMPOTENCY_TABLE: !Ref IdempotencyTableName
 
           LOG_LEVEL: INFO
+
+  OutboxPublisherExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectName}-${Environment}-outbox-publisher-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole'
+
+      Policies:
+        - PolicyName: OutboxPublisherRuntimeAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ReadDatabasePassword
+                Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${ProjectName}/${Environment}/database/password'
+
+              - Sid: PublishAppointmentEvents
+                Effect: Allow
+                Action:
+                  - events:PutEvents
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:event-bus/default'
+
+  OutboxPublisherFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${ProjectName}-${Environment}-outbox-publisher'
+      Runtime: python3.12
+      Handler: app.handler
+      Role: !GetAtt OutboxPublisherExecutionRole.Arn
+      Timeout: 60
+      MemorySize: 256
+
+      Code:
+        S3Bucket: !Ref ArtifactsBucketName
+        S3Key: !Ref OutboxPublisherCodeKey
+
+      VpcConfig:
+        SecurityGroupIds:
+          - Fn::ImportValue:
+              Fn::Sub: '${NetworkStackName}-LambdaSecurityGroupId'
+        SubnetIds:
+          - Fn::ImportValue:
+              Fn::Sub: '${NetworkStackName}-PrivateSubnetAId'
+          - Fn::ImportValue:
+              Fn::Sub: '${NetworkStackName}-PrivateSubnetBId'
+
+      Environment:
+        Variables:
+          DB_HOST: !Ref DatabaseHost
+          DB_PORT: '3306'
+          DB_NAME: medislot
+          DB_USER: !Ref DatabaseUsername
+          DB_PASSWORD_PARAMETER: !Sub '/${ProjectName}/${Environment}/database/password'
+          EVENT_BUS_NAME: default
+          BATCH_SIZE: '10'
+          MAX_ATTEMPTS: '8'
+          LOCK_SECONDS: '120'
+          LOG_LEVEL: INFO
+
+  OutboxPublisherScheduleRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectName}-${Environment}-outbox-scheduler-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: scheduler.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: InvokeOutboxPublisher
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: !GetAtt OutboxPublisherFunction.Arn
+
+  OutboxPublisherSchedule:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Name: !Sub '${ProjectName}-${Environment}-outbox-publisher'
+      Description: Periodically publishes pending MediSlot appointment events
+      ScheduleExpression: rate(1 minute)
+      State: ENABLED
+      FlexibleTimeWindow:
+        Mode: 'OFF'
+      Target:
+        Arn: !GetAtt OutboxPublisherFunction.Arn
+        RoleArn: !GetAtt OutboxPublisherScheduleRole.Arn
+        Input: '{}'
 
   # --------------------------------------------------
   # EXISTING HTTP API INTEGRATION
@@ -250,3 +360,7 @@ Outputs:
   AppointmentsIntegrationId:
     Description: API Gateway integration for appointment routes
     Value: !Ref AppointmentsIntegration
+
+  OutboxPublisherFunctionName:
+    Description: Appointment outbox publisher Lambda function name
+    Value: !Ref OutboxPublisherFunction
